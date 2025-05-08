@@ -5,6 +5,7 @@ from skimage.feature import graycomatrix, graycoprops
 import cv2  # For image processing
 import joblib
 from tqdm import tqdm
+import matplotlib.pyplot as plt  # Add this import at the top of the file
 
 class GLCMModel:
     def __init__(self, config):
@@ -173,14 +174,39 @@ class GLCMModel:
 
     def evaluate(self, test_data):
         """
-        Evaluate the model's performance on test data.
+        Evaluate the model's performance on test data and display example predictions with visualizations.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before evaluation.")
-        test_features = self.extract_glcm_features(test_data["images"], test_data.get("rois"))
+
+        # Extract GLCM features for test data with progress bar
+        print("Extracting GLCM features for test data...")
+        test_features = []
+        for idx in tqdm(range(len(test_data["images"])), desc="Testing Progress"):
+            test_features.append(self.extract_glcm_features([test_data["images"][idx]], [test_data.get("rois", [])[idx]]))
+        test_features = np.array(test_features).squeeze()
+
+        # Make predictions
         predictions = self.model.predict(test_features)
+
+        # Calculate accuracy
         accuracy = accuracy_score(test_data["labels"], predictions)
-        report = classification_report(test_data["labels"], predictions)
+        print(f"Test Accuracy: {accuracy:.2f}")
+
+        # Generate classification report
+        report = classification_report(test_data["labels"], predictions, target_names=np.unique(test_data["labels"]))
+        print("Classification Report:\n", report)
+
+        # Display example predictions with visualizations
+        print("\nExample Predictions with Visualizations:")
+        num_examples = min(5, len(predictions))  # Show up to 5 examples
+        for i in range(num_examples):
+            plt.figure(figsize=(4, 4))
+            plt.imshow(test_data["images"][i], cmap="gray")
+            plt.title(f"Predicted: {predictions[i]}\nGround Truth: {test_data['labels'][i]}")
+            plt.axis("off")
+            plt.show()
+
         return accuracy, report
 
     def save_model(self, filepath):

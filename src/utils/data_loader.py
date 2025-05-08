@@ -18,51 +18,39 @@ def load_data(data_path):
         if not annotations_file:
             raise FileNotFoundError(f"No JSON annotations file found in {split_path}")
 
-        # SAFE load JSON
+        # Load JSON annotations
         with open(annotations_file, "r") as f:
-            raw = f.read()
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"JSON Decode Error in {annotations_file}: {e}")
+            data = json.load(f)
 
-            if isinstance(data, str):
-                # Try double parsing if it's a JSON string inside a string
-                try:
-                    data = json.loads(data)
-                except json.JSONDecodeError:
-                    raise ValueError(f"Double-parsing failed. File is likely corrupt: {annotations_file}")
-
-        # Map image_id to filename
+        # Map image_id to filename and filter for depth labels
         id_to_filename = {img["id"]: img["file_name"] for img in data["images"]}
         id_to_category = {cat["id"]: cat["name"] for cat in data["categories"]}
 
-        # Get a label per image
-        image_labels = {}
+        # Filter annotations for depth categories only
+        depth_labels = ["depth-deep", "depth-shallow"]  # Adjust based on your dataset
         for ann in data["annotations"]:
             img_id = ann["image_id"]
             cat_id = ann["category_id"]
-            if img_id not in image_labels:
-                image_labels[img_id] = id_to_category[cat_id]
-
-        for img_id, filename in id_to_filename.items():
-            file_path = os.path.join(split_path, filename)
-            if not os.path.exists(file_path):
-                continue  # Skip missing images
-            image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-            if image is not None and img_id in image_labels:
-                images.append(image)
-                labels.append(image_labels[img_id])
+            category_name = id_to_category[cat_id]
+            if category_name in depth_labels:
+                file_path = os.path.join(split_path, id_to_filename[img_id])
+                image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
+                if image is not None:
+                    images.append(image)
+                    labels.append(category_name)
 
         return np.array(images), np.array(labels)
 
-    # Load each data split
+    # Load train, validation, and test splits
     train_images, train_labels = load_split(os.path.join(data_path, "train"))
     val_images, val_labels = load_split(os.path.join(data_path, "valid"))
     test_images, test_labels = load_split(os.path.join(data_path, "test"))
 
-    return (
-        {"images": train_images, "labels": train_labels},
-        {"images": val_images, "labels": val_labels},
-        {"images": test_images, "labels": test_labels},
-    )
+    return {
+        "train_images": train_images,
+        "train_labels": train_labels,
+        "val_images": val_images,
+        "val_labels": val_labels,
+        "test_images": test_images,
+        "test_labels": test_labels,
+    }
