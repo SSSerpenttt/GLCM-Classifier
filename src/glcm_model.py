@@ -241,6 +241,41 @@ class GLCMModel:
         plt.title("Confusion Matrix")
         plt.show()
 
+        # Visualize predictions for three random images
+        print("\nDisplaying Ground Truth vs Predictions for Random Images:")
+        import random
+        random_indices = random.sample(range(len(test_data["images"])), 3)
+
+        for i, idx in enumerate(random_indices):
+            image = test_data["images"][idx]
+
+            plt.figure(figsize=(12, 6))
+
+            # Ground Truth Visualization
+            plt.subplot(1, 2, 1)
+            plt.imshow(image, cmap="gray")
+            for j, roi in enumerate(test_data["rois"][idx]):
+                x, y, w, h = map(int, roi)
+                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2))
+                label = test_data["labels"][idx][j]
+                plt.text(x, y - 5, f"GT: {label}", color="green", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
+            plt.title(f"Image {i + 1}: Ground Truth")
+            plt.axis("off")
+
+            # Predicted Visualization
+            plt.subplot(1, 2, 2)
+            plt.imshow(image, cmap="gray")
+            for j, roi in enumerate(test_data["rois"][idx]):
+                x, y, w, h = map(int, roi)
+                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--"))
+                # Get the predicted label for this ROI
+                predicted_label = self.mlb.classes_[predictions[roi_indices.index(idx) + j]]
+                plt.text(x, y + h + 5, f"Pred: {predicted_label}", color="red", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
+            plt.title(f"Image {i + 1}: Predictions")
+            plt.axis("off")
+
+            plt.show()
+
         return accuracy, report
 
     def save_model(self, filepath):
