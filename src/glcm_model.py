@@ -204,9 +204,13 @@ class GLCMModel:
 
         print("Extracting GLCM features for test data...")
         test_features = []
+        roi_indices = []  # To track which ROIs belong to which image
         for idx in tqdm(range(len(test_data["images"])), desc="Testing Progress"):
-            test_features.append(self.extract_glcm_features([test_data["images"][idx]], [test_data["rois"][idx]]))
-        test_features = np.vstack(test_features)  # Combine features for all ROIs
+            features = self.extract_glcm_features([test_data["images"][idx]], [test_data["rois"][idx]])
+            test_features.extend(features)  # Add features for all ROIs in the image
+            roi_indices.extend([idx] * len(features))  # Track the image index for each ROI
+
+        test_features = np.array(test_features)
 
         # Flatten ground truth labels to match the ROI-level predictions
         test_labels = [label for labels in test_data["labels"] for label in labels]
@@ -258,7 +262,8 @@ class GLCMModel:
             for j, roi in enumerate(test_data["rois"][idx]):
                 x, y, w, h = map(int, roi)
                 plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--"))
-                predicted_label = self.mlb.classes_[predictions[j]]
+                # Get the predicted label for this ROI
+                predicted_label = self.mlb.classes_[predictions[roi_indices.index(idx) + j]]
                 plt.text(x, y + h + 5, f"Pred: {predicted_label}", color="red", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
             plt.title(f"Image {i + 1}: Predictions")
             plt.axis("off")
