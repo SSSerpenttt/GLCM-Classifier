@@ -112,61 +112,61 @@ class GLCMModel:
         self.data['test_labels'] = test_labels
 
     def train(self, train_data, val_data):
-    """
-    Train the model using the provided training and validation data.
-    Implements early stopping based on validation accuracy.
-    """
-    # GLCM feature extraction with progress bar for training data
-    print("Extracting GLCM features for training data...")
-    train_features = []
-    for idx in tqdm(range(len(train_data["images"])), desc="Training GLCM Extraction"):
-        train_features.append(self.extract_glcm_features([train_data["images"][idx]], [train_data.get("rois", [])[idx]]))
-    train_features = np.array(train_features).squeeze()
+        """
+        Train the model using the provided training and validation data.
+        Implements early stopping based on validation accuracy.
+        """
+        # GLCM feature extraction with progress bar for training data
+        print("Extracting GLCM features for training data...")
+        train_features = []
+        for idx in tqdm(range(len(train_data["images"])), desc="Training GLCM Extraction"):
+            train_features.append(self.extract_glcm_features([train_data["images"][idx]], [train_data.get("rois", [])[idx]]))
+        train_features = np.array(train_features).squeeze()
 
-    # GLCM feature extraction with progress bar for validation data
-    print("Extracting GLCM features for validation data...")
-    val_features = []
-    for idx in tqdm(range(len(val_data["images"])), desc="Validation GLCM Extraction"):
-        val_features.append(self.extract_glcm_features([val_data["images"][idx]], [val_data.get("rois", [])[idx]]))
-    val_features = np.array(val_features).squeeze()
+        # GLCM feature extraction with progress bar for validation data
+        print("Extracting GLCM features for validation data...")
+        val_features = []
+        for idx in tqdm(range(len(val_data["images"])), desc="Validation GLCM Extraction"):
+            val_features.append(self.extract_glcm_features([val_data["images"][idx]], [val_data.get("rois", [])[idx]]))
+        val_features = np.array(val_features).squeeze()
 
-    # Flatten labels for multi-class classification
-    train_labels = np.argmax(train_data["labels"], axis=1)
-    val_labels = np.argmax(val_data["labels"], axis=1)
+        # Flatten labels for multi-class classification
+        train_labels = np.argmax(train_data["labels"], axis=1)
+        val_labels = np.argmax(val_data["labels"], axis=1)
 
-    epochs = self.config.epochs  # Use the epochs attribute from Config
-    best_accuracy = 0
-    patience = max(5, int(len(train_data["images"]) / 100))  # 1 epoch per 100 training images, minimum 5
-    patience_counter = 0
+        epochs = self.config.epochs  # Use the epochs attribute from Config
+        best_accuracy = 0
+        patience = max(5, int(len(train_data["images"]) / 100))  # 1 epoch per 100 training images, minimum 5
+        patience_counter = 0
 
-    # Initialize tqdm progress bar for training epochs
-    with tqdm(total=epochs, desc="Training Progress", unit="epoch") as pbar:
-        for epoch in range(epochs):
-            # Fit the model
-            self.model.fit(train_features, train_labels)
+        # Initialize tqdm progress bar for training epochs
+        with tqdm(total=epochs, desc="Training Progress", unit="epoch") as pbar:
+            for epoch in range(epochs):
+                # Fit the model
+                self.model.fit(train_features, train_labels)
 
-            # Evaluate on validation data
-            val_predictions = self.model.predict(val_features)
-            accuracy = accuracy_score(val_labels, val_predictions)
-            print(f"Epoch {epoch + 1}/{epochs} - Validation Accuracy: {accuracy:.2f}")
+                # Evaluate on validation data
+                val_predictions = self.model.predict(val_features)
+                accuracy = accuracy_score(val_labels, val_predictions)
+                print(f"Epoch {epoch + 1}/{epochs} - Validation Accuracy: {accuracy:.2f}")
 
-            # Update the progress bar
-            pbar.set_postfix({"Validation Accuracy": f"{accuracy:.2f}"})
-            pbar.update(1)
+                # Update the progress bar
+                pbar.set_postfix({"Validation Accuracy": f"{accuracy:.2f}"})
+                pbar.update(1)
 
-            # Check for improvement
-            if accuracy > best_accuracy:
-                best_accuracy = accuracy
-                patience_counter = 0
-                # Optionally save the best model
-                joblib.dump(self.model, "best_model.pkl")
-            else:
-                patience_counter += 1
+                # Check for improvement
+                if accuracy > best_accuracy:
+                    best_accuracy = accuracy
+                    patience_counter = 0
+                    # Optionally save the best model
+                    joblib.dump(self.model, "best_model.pkl")
+                else:
+                    patience_counter += 1
 
-            # Early stopping
-            if patience_counter >= patience:
-                print("Early stopping triggered.")
-                break
+                # Early stopping
+                if patience_counter >= patience:
+                    print("Early stopping triggered.")
+                    break
 
     def predict(self, input_data, rois=None):
       """
