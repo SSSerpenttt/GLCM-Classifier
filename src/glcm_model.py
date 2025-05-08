@@ -212,8 +212,8 @@ class GLCMModel:
 
         test_features = np.array(test_features)
 
-        # Debugging: Check extracted features
-        print(f"Extracted test features shape: {test_features.shape}")
+        print(f"[Debug] Extracted test features shape: {test_features.shape}")
+        print(f"[Debug] Total ROI predictions expected: {len(test_features)}")
 
         # Flatten ground truth labels to match the ROI-level predictions
         test_labels = [label for labels in test_data["labels"] for label in labels]
@@ -222,8 +222,9 @@ class GLCMModel:
         # Predict depth labels for all ROIs
         predictions = self.model.predict(test_features)
 
-        # Debugging: Check predictions
-        print(f"Predictions: {predictions}")
+        print(f"[Debug] Predictions shape: {predictions.shape}")
+        print(f"[Debug] First 5 predictions: {predictions[:5]}")
+        print(f"[Debug] Label classes: {getattr(self.mlb, 'classes_', 'Not Set')}")
 
         # Calculate accuracy
         accuracy = accuracy_score(test_labels, predictions)
@@ -247,6 +248,8 @@ class GLCMModel:
         for idx, image_idx in enumerate(roi_indices):
             grouped_predictions[image_idx].append(predictions[idx])
 
+        print(f"[Debug] Unique image indices with predictions: {list(grouped_predictions.keys())[:5]}")
+
         # Visualize predictions for three random images
         print("\nDisplaying Ground Truth vs Predictions for Random Images:")
         import random
@@ -262,8 +265,8 @@ class GLCMModel:
             plt.imshow(image, cmap="gray")
             for j, roi in enumerate(test_data["rois"][idx]):
                 x, y, w, h = map(int, roi)
-                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2))
                 label = test_data["labels"][idx][j]
+                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2))
                 plt.text(x, y - 5, f"GT: {label}", color="green", fontsize=10,
                         bbox=dict(facecolor="white", alpha=0.5))
             plt.title(f"Image {i + 1}: Ground Truth")
@@ -272,18 +275,37 @@ class GLCMModel:
             # Predicted Visualization
             plt.subplot(1, 2, 2)
             plt.imshow(image, cmap="gray")
+
+            preds_for_image = grouped_predictions.get(idx, [])
+            if len(preds_for_image) == 0:
+                print(f"[Warning] No predictions found for image index {idx}")
+            else:
+                print(f"[Info] Found {len(preds_for_image)} predictions for image {idx}")
+
             for j, roi in enumerate(test_data["rois"][idx]):
                 x, y, w, h = map(int, roi)
-                predicted_label = self.mlb.classes_[grouped_predictions[idx][j]]
+
+                if j < len(preds_for_image):
+                    predicted_class_index = preds_for_image[j]
+                    try:
+                        predicted_label = self.mlb.classes_[predicted_class_index]
+                    except IndexError:
+                        predicted_label = f"(Invalid Index: {predicted_class_index})"
+                        print(f"[Error] IndexError for predicted class: {predicted_class_index}")
+                else:
+                    predicted_label = "(No Prediction)"
+                    print(f"[Warning] Missing prediction for ROI #{j} in image {idx}")
+
                 plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--"))
                 plt.text(x, y + h + 5, f"Pred: {predicted_label}", color="red", fontsize=10,
                         bbox=dict(facecolor="white", alpha=0.5))
+
             plt.title(f"Image {i + 1}: Predictions")
             plt.axis("off")
-
             plt.show()
 
         return accuracy, report
+
 
     def save_model(self, filepath):
         """
