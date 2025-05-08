@@ -2,11 +2,13 @@ import os
 import cv2
 import numpy as np
 import json
+from collections import defaultdict
 
 def load_data(data_path):
     def load_split(split_path):
         images = []
         labels = []
+        rois = []
 
         # Find the annotations file
         annotations_file = None
@@ -22,35 +24,40 @@ def load_data(data_path):
         with open(annotations_file, "r") as f:
             data = json.load(f)
 
-        # Map image_id to filename and filter for depth labels
+        # Map image_id to filename and category
         id_to_filename = {img["id"]: img["file_name"] for img in data["images"]}
         id_to_category = {cat["id"]: cat["name"] for cat in data["categories"]}
 
-        # Filter annotations for depth categories only
-        depth_labels = ["depth-deep", "depth-shallow"]  # Adjust based on your dataset
+        # Group annotations by image_id
+        annotations_by_image = defaultdict(list)
         for ann in data["annotations"]:
-            img_id = ann["image_id"]
-            cat_id = ann["category_id"]
-            category_name = id_to_category[cat_id]
-            if category_name in depth_labels:
-                file_path = os.path.join(split_path, id_to_filename[img_id])
-                image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-                if image is not None:
-                    images.append(image)
-                    labels.append(category_name)
+            annotations_by_image[ann["image_id"]].append(ann)
 
-        return np.array(images), np.array(labels)
+        # Process each image and its annotations
+        for img_id, anns in annotations_by_image.items():
+            file_path = os.path.join(split_path, id_to_filename[img_id])
+            image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
+            if image is not None:
+                images.append(image)
+                image_rois = []
+                image_labels = []
+                for ann in anns:
+                    cat_id = ann["category_id"]
+                    category_name = id_to_category[cat_id]
+                    image_rois.append(ann["bbox"])  # Add bounding box (ROI)
+                    image_labels.append(category_name)
+                rois.append(image_rois)
+                labels.append(image_labels)
+
+        return np.array(images), labels, rois
 
     # Load train, validation, and test splits
-    train_images, train_labels = load_split(os.path.join(data_path, "train"))
-    val_images, val_labels = load_split(os.path.join(data_path, "valid"))
-    test_images, test_labels = load_split(os.path.join(data_path, "test"))
+    train_images, train_labels, train_rois = load_split(os.path.join(data_path, "train"))
+    val_images, val_labels, val_rois = load_split(os.path.join(data_path, "valid"))
+    test_images, test_labels, test_rois = load_split(os.path.join(data_path, "test"))
 
     return {
-        "train_images": train_images,
-        "train_labels": train_labels,
-        "val_images": val_images,
-        "val_labels": val_labels,
-        "test_images": test_images,
-        "test_labels": test_labels,
+        "train_data": {"images": train_images, "labels": train_labels, "rois": train_rois},
+        "val_data": {"images": val_images, "labels": val_labels, "rois": val_rois},
+        "test_data": {"images": test_images, "labels": test_labels, "rois": test_rois},
     }
