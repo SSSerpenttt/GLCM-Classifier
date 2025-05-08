@@ -114,15 +114,26 @@ class GLCMModel:
         Train the model using the provided training and validation data.
         Implements early stopping based on validation accuracy.
         """
-        train_features = self.extract_glcm_features(train_data["images"], train_data.get("rois"))
-        val_features = self.extract_glcm_features(val_data["images"], val_data.get("rois"))
+        # GLCM feature extraction with progress bar for training data
+        print("Extracting GLCM features for training data...")
+        train_features = []
+        for idx in tqdm(range(len(train_data["images"])), desc="Training GLCM Extraction"):
+            train_features.append(self.extract_glcm_features([train_data["images"][idx]], [train_data.get("rois", [])[idx]]))
+        train_features = np.array(train_features).squeeze()
+
+        # GLCM feature extraction with progress bar for validation data
+        print("Extracting GLCM features for validation data...")
+        val_features = []
+        for idx in tqdm(range(len(val_data["images"])), desc="Validation GLCM Extraction"):
+            val_features.append(self.extract_glcm_features([val_data["images"][idx]], [val_data.get("rois", [])[idx]]))
+        val_features = np.array(val_features).squeeze()
 
         epochs = self.config.epochs  # Use the epochs attribute from Config
         best_accuracy = 0
         patience = 3  # Number of epochs to wait for improvement
         patience_counter = 0
 
-        # Initialize tqdm progress bar
+        # Initialize tqdm progress bar for training epochs
         with tqdm(total=epochs, desc="Training Progress", unit="epoch") as pbar:
             for epoch in range(epochs):
                 # Fit the model
