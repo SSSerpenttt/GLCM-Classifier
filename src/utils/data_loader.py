@@ -48,7 +48,6 @@ def load_data(data_path, include_labels=None):
             file_path = os.path.join(split_path, id_to_filename[img_id])
             image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
             if image is not None:
-                images.append(image)
                 image_rois = []
                 image_labels = []
                 for ann in anns:
@@ -61,6 +60,7 @@ def load_data(data_path, include_labels=None):
                         image_rois.append([x, y, w, h])
                         image_labels.append(category_name)
                 if image_rois:  # Only add images with valid ROIs
+                    images.append(image)
                     rois.append(image_rois)
                     labels.append(image_labels)
 
