@@ -197,7 +197,7 @@ class GLCMModel:
     def evaluate(self, test_data):
         """
         Evaluate the model's performance on test data and display example predictions with visualizations.
-        Includes predicted ROIs vs ground truth ROIs with labels, a confusion matrix graph, and mAP scores.
+        Displays images with their ROIs and the predicted labels for each ROI.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before evaluation.")
@@ -251,29 +251,14 @@ class GLCMModel:
         print(f"[Debug] Unique image indices with predictions: {list(grouped_predictions.keys())[:5]}")
 
         # Visualize predictions for three random images
-        print("\nDisplaying Ground Truth vs Predictions for Random Images:")
+        print("\nDisplaying Predictions for Random Images:")
         import random
         random_indices = random.sample(range(len(test_data["images"])), 3)
 
         for i, idx in enumerate(random_indices):
             image = test_data["images"][idx]
 
-            plt.figure(figsize=(12, 6))
-
-            # Ground Truth Visualization
-            plt.subplot(1, 2, 1)
-            plt.imshow(image, cmap="gray")
-            for j, roi in enumerate(test_data["rois"][idx]):
-                x, y, w, h = map(int, roi)
-                label = test_data["labels"][idx][j]
-                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2))
-                plt.text(x, y - 5, f"GT: {label}", color="green", fontsize=10,
-                        bbox=dict(facecolor="white", alpha=0.5))
-            plt.title(f"Image {i + 1}: Ground Truth")
-            plt.axis("off")
-
-            # Predicted Visualization
-            plt.subplot(1, 2, 2)
+            plt.figure(figsize=(8, 8))
             plt.imshow(image, cmap="gray")
 
             preds_for_image = grouped_predictions.get(idx, [])
