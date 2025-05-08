@@ -37,7 +37,8 @@ class GLCMModel:
             if rois is not None and idx < len(rois):
                 image_features = []
                 for roi in rois[idx]:  # Iterate over multiple ROIs for the current image
-                    x, y, w, h = roi  # ROI format: (x, y, width, height)
+                    # Ensure ROI coordinates are integers
+                    x, y, w, h = map(int, roi)  # Convert ROI values to integers
                     cropped_image = image[y:y+h, x:x+w]
 
                     # Compute GLCM and extract features for the cropped region
