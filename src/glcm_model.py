@@ -1,6 +1,6 @@
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import MultiLabelBinarizer
 from skimage.feature import graycomatrix, graycoprops
 import cv2  # For image processing
@@ -175,6 +175,7 @@ class GLCMModel:
     def evaluate(self, test_data):
         """
         Evaluate the model's performance on test data and display example predictions with visualizations.
+        Includes predicted ROIs vs ground truth ROIs and a confusion matrix graph.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before evaluation.")
@@ -194,14 +195,35 @@ class GLCMModel:
         report = classification_report(test_labels, predictions, target_names=self.mlb.classes_)
         print("Classification Report:\n", report)
 
+        # Confusion Matrix
+        print("\nConfusion Matrix:")
+        cm = confusion_matrix(test_labels, predictions)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.mlb.classes_)
+        disp.plot(cmap="Blues", xticks_rotation="vertical")
+        plt.title("Confusion Matrix")
+        plt.show()
+
         # Display example predictions with visualizations
         print("\nExample Predictions with Visualizations:")
         num_examples = min(5, len(predictions))  # Show up to 5 examples
         for i in range(num_examples):
-            plt.figure(figsize=(4, 4))
+            plt.figure(figsize=(8, 8))
             plt.imshow(test_data["images"][i], cmap="gray")
+
+            # Draw ground truth ROIs
+            for roi in test_data["rois"][i]:
+                x, y, w, h = map(int, roi)
+                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2, label="Ground Truth"))
+
+            # Draw predicted ROIs (if available)
+            if "predicted_rois" in test_data:
+                for roi in test_data["predicted_rois"][i]:
+                    x, y, w, h = map(int, roi)
+                    plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--", label="Prediction"))
+
             plt.title(f"Predicted: {predictions[i]}\nGround Truth: {test_data['labels'][i]}")
             plt.axis("off")
+            plt.legend(loc="upper right")
             plt.show()
 
         return accuracy, report
