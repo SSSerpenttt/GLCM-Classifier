@@ -4,7 +4,17 @@ import numpy as np
 import json
 from collections import defaultdict
 
-def load_data(data_path):
+def load_data(data_path, include_labels=None):
+    """
+    Load data from the specified path, filtering ROIs by the specified labels.
+
+    Args:
+        data_path (str): Path to the dataset directory.
+        include_labels (list, optional): List of labels to include. If None, include all labels.
+
+    Returns:
+        dict: A dictionary containing train, validation, and test data.
+    """
     def load_split(split_path):
         images = []
         labels = []
@@ -44,10 +54,13 @@ def load_data(data_path):
                 for ann in anns:
                     cat_id = ann["category_id"]
                     category_name = id_to_category[cat_id]
-                    image_rois.append(ann["bbox"])  # Add bounding box (ROI)
-                    image_labels.append(category_name)
-                rois.append(image_rois)
-                labels.append(image_labels)
+                    # Filter by include_labels if specified
+                    if include_labels is None or category_name in include_labels:
+                        image_rois.append(ann["bbox"])  # Add bounding box (ROI)
+                        image_labels.append(category_name)
+                if image_rois:  # Only add images with valid ROIs
+                    rois.append(image_rois)
+                    labels.append(image_labels)
 
         return np.array(images), labels, rois
 
