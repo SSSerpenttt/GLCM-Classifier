@@ -177,13 +177,22 @@ class GLCMModel:
                     break
 
     def predict(self, input_data, rois=None):
-      """
-      Make predictions using the trained model.
-      """
-      if self.model is None:
-          raise ValueError("Model is not trained yet. Train the model before making predictions.")
-      input_features = self.extract_glcm_features(input_data, rois)
-      return self.model.predict(input_features)
+        """
+        Make predictions using the trained model.
+        The model will infer depth labels for each ROI based on GLCM features.
+        """
+        if self.model is None:
+            raise ValueError("Model is not trained yet. Train the model before making predictions.")
+
+        if rois is None:
+            raise ValueError("ROIs must be provided for prediction.")
+
+        # Extract GLCM features for the provided ROIs
+        input_features = self.extract_glcm_features(input_data, rois)
+
+        # Predict depth labels for each ROI
+        predictions = self.model.predict(input_features)
+        return predictions
 
     def evaluate(self, test_data):
         """
@@ -196,10 +205,14 @@ class GLCMModel:
         print("Extracting GLCM features for test data...")
         test_features = []
         for idx in tqdm(range(len(test_data["images"])), desc="Testing Progress"):
-            test_features.append(self.extract_glcm_features([test_data["images"][idx]], [test_data.get("rois", [])[idx]]))
-        test_features = np.array(test_features).squeeze()
+            test_features.append(self.extract_glcm_features([test_data["images"][idx]], [test_data["rois"][idx]]))
+        test_features = np.vstack(test_features)  # Combine features for all ROIs
 
-        test_labels = self.preprocess_labels(test_data["labels"])
+        # Flatten ground truth labels to match the ROI-level predictions
+        test_labels = [label for labels in test_data["labels"] for label in labels]
+        test_labels = self.preprocess_labels(test_labels)
+
+        # Predict depth labels for all ROIs
         predictions = self.model.predict(test_features)
 
         # Calculate accuracy
@@ -218,21 +231,7 @@ class GLCMModel:
         plt.title("Confusion Matrix")
         plt.show()
 
-        # Calculate mAP scores
-        print("\nCalculating mAP scores...")
-        test_labels_binary = self.mlb.transform(test_data["labels"])  # Convert to binary format
-        predictions_binary = self.mlb.transform([[self.mlb.classes_[pred]] for pred in predictions])  # Convert predictions to binary format
-
-        ap_scores = []
-        for i, class_name in enumerate(self.mlb.classes_):
-            ap = average_precision_score(test_labels_binary[:, i], predictions_binary[:, i])
-            ap_scores.append(ap)
-            print(f"AP for class '{class_name}': {ap:.2f}")
-
-        mAP = sum(ap_scores) / len(ap_scores)
-        print(f"\nMean Average Precision (mAP): {mAP:.2f}")
-
-        # Display two instances of the same image for three random examples
+        # Visualize predictions for three random images
         print("\nDisplaying Ground Truth vs Predictions for Random Images:")
         import random
         random_indices = random.sample(range(len(test_data["images"])), 3)
@@ -248,7 +247,7 @@ class GLCMModel:
             for j, roi in enumerate(test_data["rois"][idx]):
                 x, y, w, h = map(int, roi)
                 plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2))
-                label = test_data["labels"][idx][j] if isinstance(test_data["labels"][idx], list) else test_data["labels"][idx]
+                label = test_data["labels"][idx][j]
                 plt.text(x, y - 5, f"GT: {label}", color="green", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
             plt.title(f"Image {i + 1}: Ground Truth")
             plt.axis("off")
@@ -256,18 +255,17 @@ class GLCMModel:
             # Predicted Visualization
             plt.subplot(1, 2, 2)
             plt.imshow(image, cmap="gray")
-            if "predicted_rois" in test_data:
-                for j, roi in enumerate(test_data["predicted_rois"][idx]):
-                    x, y, w, h = map(int, roi)
-                    plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--"))
-                    predicted_label = self.mlb.classes_[predictions[idx]]
-                    plt.text(x, y + h + 5, f"Pred: {predicted_label}", color="red", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
+            for j, roi in enumerate(test_data["rois"][idx]):
+                x, y, w, h = map(int, roi)
+                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--"))
+                predicted_label = self.mlb.classes_[predictions[j]]
+                plt.text(x, y + h + 5, f"Pred: {predicted_label}", color="red", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
             plt.title(f"Image {i + 1}: Predictions")
             plt.axis("off")
 
             plt.show()
 
-        return accuracy, report, mAP
+        return accuracy, report
 
     def save_model(self, filepath):
         """
