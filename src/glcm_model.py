@@ -110,40 +110,46 @@ class GLCMModel:
         self.data['test_labels'] = test_labels
 
     def train(self, train_data, val_data):
-      """
-      Train the model using the provided training and validation data.
-      Implements early stopping based on validation accuracy.
-      """
-      train_features = self.extract_glcm_features(train_data["images"], train_data.get("rois"))
-      val_features = self.extract_glcm_features(val_data["images"], val_data.get("rois"))
+        """
+        Train the model using the provided training and validation data.
+        Implements early stopping based on validation accuracy.
+        """
+        train_features = self.extract_glcm_features(train_data["images"], train_data.get("rois"))
+        val_features = self.extract_glcm_features(val_data["images"], val_data.get("rois"))
 
-      epochs = self.config.get("epochs", 10)  # Default to 10 epochs if not specified
-      best_accuracy = 0
-      patience = 3  # Number of epochs to wait for improvement
-      patience_counter = 0
+        epochs = self.config.epochs  # Use the epochs attribute from Config
+        best_accuracy = 0
+        patience = 3  # Number of epochs to wait for improvement
+        patience_counter = 0
 
-      for epoch in tqdm(range(epochs), desc="Training Progress"):
-          # Fit the model
-          self.model.fit(train_features, train_data["labels"])
+        # Initialize tqdm progress bar
+        with tqdm(total=epochs, desc="Training Progress", unit="epoch") as pbar:
+            for epoch in range(epochs):
+                # Fit the model
+                self.model.fit(train_features, train_data["labels"])
 
-          # Evaluate on validation data
-          val_predictions = self.model.predict(val_features)
-          accuracy = accuracy_score(val_data["labels"], val_predictions)
-          print(f"Epoch {epoch + 1}/{epochs} - Validation Accuracy: {accuracy:.2f}")
+                # Evaluate on validation data
+                val_predictions = self.model.predict(val_features)
+                accuracy = accuracy_score(val_data["labels"], val_predictions)
+                print(f"Epoch {epoch + 1}/{epochs} - Validation Accuracy: {accuracy:.2f}")
 
-          # Check for improvement
-          if accuracy > best_accuracy:
-              best_accuracy = accuracy
-              patience_counter = 0
-              # Optionally save the best model
-              joblib.dump(self.model, "best_model.pkl")
-          else:
-              patience_counter += 1
+                # Update the progress bar
+                pbar.set_postfix({"Validation Accuracy": f"{accuracy:.2f}"})
+                pbar.update(1)
 
-          # Early stopping
-          if patience_counter >= patience:
-              print("Early stopping triggered.")
-              break
+                # Check for improvement
+                if accuracy > best_accuracy:
+                    best_accuracy = accuracy
+                    patience_counter = 0
+                    # Optionally save the best model
+                    joblib.dump(self.model, "best_model.pkl")
+                else:
+                    patience_counter += 1
+
+                # Early stopping
+                if patience_counter >= patience:
+                    print("Early stopping triggered.")
+                    break
 
     def predict(self, input_data, rois=None):
       """
