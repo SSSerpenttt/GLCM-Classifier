@@ -130,16 +130,16 @@ class GLCMModel:
             val_features.append(self.extract_glcm_features([val_data["images"][idx]], [val_data.get("rois", [])[idx]]))
         val_features = np.array(val_features).squeeze()
 
-        # Flatten labels for multi-class classification if necessary
-        if len(train_data["labels"].shape) > 1:
-            train_labels = np.argmax(train_data["labels"], axis=1)
-        else:
-            train_labels = train_data["labels"]
+        # Convert labels to NumPy arrays
+        train_labels = np.array(train_data["labels"])
+        val_labels = np.array(val_data["labels"])
 
-        if len(val_data["labels"].shape) > 1:
-            val_labels = np.argmax(val_data["labels"], axis=1)
-        else:
-            val_labels = val_data["labels"]
+        # Flatten labels for multi-class classification if necessary
+        if len(train_labels.shape) > 1:
+            train_labels = np.argmax(train_labels, axis=1)
+
+        if len(val_labels.shape) > 1:
+            val_labels = np.argmax(val_labels, axis=1)
 
         epochs = self.config.epochs  # Use the epochs attribute from Config
         best_accuracy = 0
