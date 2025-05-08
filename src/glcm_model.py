@@ -1,6 +1,6 @@
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import MultiLabelBinarizer
 from skimage.feature import graycomatrix, graycoprops
 import cv2  # For image processing
@@ -91,29 +91,42 @@ class GLCMModel:
         """
         Load data using the provided data loader.
         Extract GLCM features for each ROI and associate them with labels.
+        Includes tqdm progress bars for loading and feature extraction.
         """
+        print("Loading data...")
         self.data = data_loader.load_data()
-        
+
         # Extract features for training data
+        print("Extracting GLCM features for training data...")
         train_images = self.data['train_images']
         train_rois = self.data['train_rois']  # List of bounding boxes for each image
-        train_labels = self.data['train_labels']  # Depth labels for each ROI
-        self.data['train_features'] = self.extract_glcm_features(train_images, train_rois)
-        self.data['train_labels'] = train_labels
+        train_features = []
+        for idx in tqdm(range(len(train_images)), desc="Training Data Progress"):
+            train_features.append(self.extract_glcm_features([train_images[idx]], [train_rois[idx]]))
+        self.data['train_features'] = np.array(train_features).squeeze()
+        self.data['train_labels'] = self.data['train_labels']
 
         # Extract features for validation data
+        print("Extracting GLCM features for validation data...")
         val_images = self.data['val_images']
         val_rois = self.data['val_rois']
-        val_labels = self.data['val_labels']
-        self.data['val_features'] = self.extract_glcm_features(val_images, val_rois)
-        self.data['val_labels'] = val_labels
+        val_features = []
+        for idx in tqdm(range(len(val_images)), desc="Validation Data Progress"):
+            val_features.append(self.extract_glcm_features([val_images[idx]], [val_rois[idx]]))
+        self.data['val_features'] = np.array(val_features).squeeze()
+        self.data['val_labels'] = self.data['val_labels']
 
         # Extract features for test data
+        print("Extracting GLCM features for test data...")
         test_images = self.data['test_images']
         test_rois = self.data['test_rois']
-        test_labels = self.data['test_labels']
-        self.data['test_features'] = self.extract_glcm_features(test_images, test_rois)
-        self.data['test_labels'] = test_labels
+        test_features = []
+        for idx in tqdm(range(len(test_images)), desc="Test Data Progress"):
+            test_features.append(self.extract_glcm_features([test_images[idx]], [test_rois[idx]]))
+        self.data['test_features'] = np.array(test_features).squeeze()
+        self.data['test_labels'] = self.data['test_labels']
+
+        print("Data loading and feature extraction completed.")
 
     def train(self, train_data, val_data):
         """
@@ -175,7 +188,7 @@ class GLCMModel:
     def evaluate(self, test_data):
         """
         Evaluate the model's performance on test data and display example predictions with visualizations.
-        Includes predicted ROIs vs ground truth ROIs and a confusion matrix graph.
+        Includes predicted ROIs vs ground truth ROIs, a confusion matrix graph, and mAP scores.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before evaluation.")
@@ -189,9 +202,11 @@ class GLCMModel:
         test_labels = self.preprocess_labels(test_data["labels"])
         predictions = self.model.predict(test_features)
 
+        # Calculate accuracy
         accuracy = accuracy_score(test_labels, predictions)
         print(f"Test Accuracy: {accuracy:.2f}")
 
+        # Classification report
         report = classification_report(test_labels, predictions, target_names=self.mlb.classes_)
         print("Classification Report:\n", report)
 
@@ -202,6 +217,20 @@ class GLCMModel:
         disp.plot(cmap="Blues", xticks_rotation="vertical")
         plt.title("Confusion Matrix")
         plt.show()
+
+        # Calculate mAP scores
+        print("\nCalculating mAP scores...")
+        test_labels_binary = self.mlb.transform(test_data["labels"])  # Convert to binary format
+        predictions_binary = self.mlb.transform([[self.mlb.classes_[pred]] for pred in predictions])  # Convert predictions to binary format
+
+        ap_scores = []
+        for i, class_name in enumerate(self.mlb.classes_):
+            ap = average_precision_score(test_labels_binary[:, i], predictions_binary[:, i])
+            ap_scores.append(ap)
+            print(f"AP for class '{class_name}': {ap:.2f}")
+
+        mAP = sum(ap_scores) / len(ap_scores)
+        print(f"\nMean Average Precision (mAP): {mAP:.2f}")
 
         # Display example predictions with visualizations
         print("\nExample Predictions with Visualizations:")
@@ -226,7 +255,7 @@ class GLCMModel:
             plt.legend(loc="upper right")
             plt.show()
 
-        return accuracy, report
+        return accuracy, report, mAP
 
     def save_model(self, filepath):
         """
