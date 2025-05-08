@@ -9,10 +9,11 @@ from tqdm import tqdm
 class GLCMModel:
     def __init__(self, config):
         """
-        Initialize the GLCMModel with a configuration dictionary.
+        Initialize the GLCMModel with a configuration object.
         """
         self.config = config
-        self.model = GradientBoostingClassifier(**config.get("model_params", {}))
+        # Access model_params directly from the Config object
+        self.model = GradientBoostingClassifier(**config.model_params)
         self.data = None
 
     def configure_model(self):
