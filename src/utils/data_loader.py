@@ -56,7 +56,9 @@ def load_data(data_path, include_labels=None):
                     category_name = id_to_category[cat_id]
                     # Filter by include_labels if specified
                     if include_labels is None or category_name in include_labels:
-                        image_rois.append(ann["bbox"])  # Add bounding box (ROI)
+                        # Convert ROI coordinates to integers
+                        x, y, w, h = map(int, ann["bbox"])
+                        image_rois.append([x, y, w, h])
                         image_labels.append(category_name)
                 if image_rois:  # Only add images with valid ROIs
                     rois.append(image_rois)
