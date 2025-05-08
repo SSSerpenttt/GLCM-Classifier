@@ -188,7 +188,7 @@ class GLCMModel:
     def evaluate(self, test_data):
         """
         Evaluate the model's performance on test data and display example predictions with visualizations.
-        Includes predicted ROIs vs ground truth ROIs, a confusion matrix graph, and mAP scores.
+        Includes predicted ROIs vs ground truth ROIs with labels, a confusion matrix graph, and mAP scores.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before evaluation.")
@@ -239,20 +239,24 @@ class GLCMModel:
             plt.figure(figsize=(8, 8))
             plt.imshow(test_data["images"][i], cmap="gray")
 
-            # Draw ground truth ROIs
-            for roi in test_data["rois"][i]:
+            # Draw ground truth ROIs with labels
+            for j, roi in enumerate(test_data["rois"][i]):
                 x, y, w, h = map(int, roi)
-                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2, label="Ground Truth"))
+                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2))
+                label = test_data["labels"][i][j] if isinstance(test_data["labels"][i], list) else test_data["labels"][i]
+                plt.text(x, y - 5, f"GT: {label}", color="green", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
 
-            # Draw predicted ROIs (if available)
+            # Draw predicted ROIs with labels (if available)
             if "predicted_rois" in test_data:
-                for roi in test_data["predicted_rois"][i]:
+                for j, roi in enumerate(test_data["predicted_rois"][i]):
                     x, y, w, h = map(int, roi)
-                    plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--", label="Prediction"))
+                    plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--"))
+                    predicted_label = self.mlb.classes_[predictions[i]]
+                    plt.text(x, y + h + 5, f"Pred: {predicted_label}", color="red", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
 
-            plt.title(f"Predicted: {predictions[i]}\nGround Truth: {test_data['labels'][i]}")
+            plt.title(f"Image {i + 1}: Ground Truth vs Predictions")
             plt.axis("off")
-            plt.legend(loc="upper right")
+            plt.legend(["Ground Truth", "Prediction"], loc="upper right")
             plt.show()
 
         return accuracy, report, mAP
