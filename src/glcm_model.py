@@ -178,6 +178,15 @@ class GLCMModel:
 
     def predict(self, input_data, rois=None):
       """
+      Make predictions using the trained model.
+      """
+      if self.model is None:
+          raise ValueError("Model is not trained yet. Train the model before making predictions.")
+      input_features = self.extract_glcm_features(input_data, rois)
+      return self.model.predict(input_features)
+
+    def evaluate(self, test_data):
+        """
         Evaluate the model's performance on test data and display example predictions with visualizations.
         Includes predicted ROIs vs ground truth ROIs with labels, a confusion matrix graph, and mAP scores.
         """
