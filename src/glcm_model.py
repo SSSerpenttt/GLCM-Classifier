@@ -23,63 +23,63 @@ class GLCMModel:
         self.model = GradientBoostingClassifier(**self.config.get("model_params", {}))
 
     def extract_glcm_features(self, images, rois=None):
-      """
-      Extract GLCM features from a list of grayscale images, optionally using multiple ROIs.
-      """
-      features = []
-      for idx, image in enumerate(images):
-          # Convert image to grayscale if not already
-          if len(image.shape) == 3:  # Check if the image is RGB
-              image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        """
+        Extract GLCM features from a list of grayscale images, optionally using multiple ROIs.
+        """
+        features = []
+        for idx, image in enumerate(images):
+            # Convert image to grayscale if not already
+            if len(image.shape) == 3:  # Check if the image is RGB
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-          # Process multiple ROIs if provided
-          if rois is not None and idx < len(rois):
-              image_features = []
-              for roi in rois[idx]:  # Iterate over multiple ROIs for the current image
-                  x, y, w, h = roi  # ROI format: (x, y, width, height)
-                  cropped_image = image[y:y+h, x:x+w]
+            # Process multiple ROIs if provided
+            if rois is not None and idx < len(rois):
+                image_features = []
+                for roi in rois[idx]:  # Iterate over multiple ROIs for the current image
+                    x, y, w, h = roi  # ROI format: (x, y, width, height)
+                    cropped_image = image[y:y+h, x:x+w]
 
-                  # Compute GLCM and extract features for the cropped region
-                  glcm = graycomatrix(
-                      cropped_image,
-                      distances=self.config.get("distances", [1]),
-                      angles=self.config.get("angles", [0]),
-                      levels=self.config.get("levels", 256),
-                      symmetric=True,
-                      normed=True,
-                  )
-                  contrast = graycoprops(glcm, 'contrast').flatten()
-                  dissimilarity = graycoprops(glcm, 'dissimilarity').flatten()
-                  homogeneity = graycoprops(glcm, 'homogeneity').flatten()
-                  energy = graycoprops(glcm, 'energy').flatten()
-                  correlation = graycoprops(glcm, 'correlation').flatten()
-                  asm = graycoprops(glcm, 'ASM').flatten()
+                    # Compute GLCM and extract features for the cropped region
+                    glcm = graycomatrix(
+                        cropped_image,
+                        distances=self.config.distances,  # Access directly
+                        angles=self.config.angles,        # Access directly
+                        levels=self.config.levels,        # Access directly
+                        symmetric=True,
+                        normed=True,
+                    )
+                    contrast = graycoprops(glcm, 'contrast').flatten()
+                    dissimilarity = graycoprops(glcm, 'dissimilarity').flatten()
+                    homogeneity = graycoprops(glcm, 'homogeneity').flatten()
+                    energy = graycoprops(glcm, 'energy').flatten()
+                    correlation = graycoprops(glcm, 'correlation').flatten()
+                    asm = graycoprops(glcm, 'ASM').flatten()
 
-                  # Combine features for this ROI
-                  roi_features = np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm])
-                  image_features.append(roi_features)
+                    # Combine features for this ROI
+                    roi_features = np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm])
+                    image_features.append(roi_features)
 
-              # Aggregate features from all ROIs for the current image (e.g., mean or concatenate)
-              features.append(np.mean(image_features, axis=0))  # Example: mean of all ROI features
-          else:
-              # If no ROIs are provided, process the entire image
-              glcm = graycomatrix(
-                  image,
-                  distances=self.config.get("distances", [1]),
-                  angles=self.config.get("angles", [0]),
-                  levels=self.config.get("levels", 256),
-                  symmetric=True,
-                  normed=True,
-              )
-              contrast = graycoprops(glcm, 'contrast').flatten()
-              dissimilarity = graycoprops(glcm, 'dissimilarity').flatten()
-              homogeneity = graycoprops(glcm, 'homogeneity').flatten()
-              energy = graycoprops(glcm, 'energy').flatten()
-              correlation = graycoprops(glcm, 'correlation').flatten()
-              asm = graycoprops(glcm, 'ASM').flatten()
-              features.append(np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm]))
+                # Aggregate features from all ROIs for the current image (e.g., mean or concatenate)
+                features.append(np.mean(image_features, axis=0))  # Example: mean of all ROI features
+            else:
+                # If no ROIs are provided, process the entire image
+                glcm = graycomatrix(
+                    image,
+                    distances=self.config.distances,  # Access directly
+                    angles=self.config.angles,        # Access directly
+                    levels=self.config.levels,        # Access directly
+                    symmetric=True,
+                    normed=True,
+                )
+                contrast = graycoprops(glcm, 'contrast').flatten()
+                dissimilarity = graycoprops(glcm, 'dissimilarity').flatten()
+                homogeneity = graycoprops(glcm, 'homogeneity').flatten()
+                energy = graycoprops(glcm, 'energy').flatten()
+                correlation = graycoprops(glcm, 'correlation').flatten()
+                asm = graycoprops(glcm, 'ASM').flatten()
+                features.append(np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm]))
 
-      return np.array(features)
+        return np.array(features)
 
     def load_data(self, data_loader):
         """
