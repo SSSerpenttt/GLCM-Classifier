@@ -178,15 +178,6 @@ class GLCMModel:
 
     def predict(self, input_data, rois=None):
       """
-      Make predictions using the trained model.
-      """
-      if self.model is None:
-          raise ValueError("Model is not trained yet. Train the model before making predictions.")
-      input_features = self.extract_glcm_features(input_data, rois)
-      return self.model.predict(input_features)
-
-    def evaluate(self, test_data):
-        """
         Evaluate the model's performance on test data and display example predictions with visualizations.
         Includes predicted ROIs vs ground truth ROIs with labels, a confusion matrix graph, and mAP scores.
         """
@@ -232,31 +223,39 @@ class GLCMModel:
         mAP = sum(ap_scores) / len(ap_scores)
         print(f"\nMean Average Precision (mAP): {mAP:.2f}")
 
-        # Display example predictions with visualizations
-        print("\nExample Predictions with Visualizations:")
-        num_examples = min(5, len(predictions))  # Show up to 5 examples
-        for i in range(num_examples):
-            plt.figure(figsize=(8, 8))
-            plt.imshow(test_data["images"][i], cmap="gray")
+        # Display two instances of the same image for three random examples
+        print("\nDisplaying Ground Truth vs Predictions for Random Images:")
+        import random
+        random_indices = random.sample(range(len(test_data["images"])), 3)
 
-            # Draw ground truth ROIs with labels
-            for j, roi in enumerate(test_data["rois"][i]):
+        for i, idx in enumerate(random_indices):
+            image = test_data["images"][idx]
+
+            plt.figure(figsize=(12, 6))
+
+            # Ground Truth Visualization
+            plt.subplot(1, 2, 1)
+            plt.imshow(image, cmap="gray")
+            for j, roi in enumerate(test_data["rois"][idx]):
                 x, y, w, h = map(int, roi)
                 plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="green", facecolor="none", lw=2))
-                label = test_data["labels"][i][j] if isinstance(test_data["labels"][i], list) else test_data["labels"][i]
+                label = test_data["labels"][idx][j] if isinstance(test_data["labels"][idx], list) else test_data["labels"][idx]
                 plt.text(x, y - 5, f"GT: {label}", color="green", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
+            plt.title(f"Image {i + 1}: Ground Truth")
+            plt.axis("off")
 
-            # Draw predicted ROIs with labels (if available)
+            # Predicted Visualization
+            plt.subplot(1, 2, 2)
+            plt.imshow(image, cmap="gray")
             if "predicted_rois" in test_data:
-                for j, roi in enumerate(test_data["predicted_rois"][i]):
+                for j, roi in enumerate(test_data["predicted_rois"][idx]):
                     x, y, w, h = map(int, roi)
                     plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--"))
-                    predicted_label = self.mlb.classes_[predictions[i]]
+                    predicted_label = self.mlb.classes_[predictions[idx]]
                     plt.text(x, y + h + 5, f"Pred: {predicted_label}", color="red", fontsize=10, bbox=dict(facecolor="white", alpha=0.5))
-
-            plt.title(f"Image {i + 1}: Ground Truth vs Predictions")
+            plt.title(f"Image {i + 1}: Predictions")
             plt.axis("off")
-            plt.legend(["Ground Truth", "Prediction"], loc="upper right")
+
             plt.show()
 
         return accuracy, report, mAP
