@@ -52,8 +52,8 @@ class GLCMModel:
                     # Dynamically calculate GLCM parameters based on ROI size
                     min_dim = min(w, h)
                     distances = [1, max(1, min_dim // 4)]
-                    angles = self.config.get("angles", [0, np.pi/4, np.pi/2, 3*np.pi/4])
-                    levels = self.config.get("levels", 256)
+                    angles = self.config.angles  # Access angles directly
+                    levels = self.config.levels  # Access levels directly
 
                     # Extract GLCM features
                     glcm = graycomatrix(
