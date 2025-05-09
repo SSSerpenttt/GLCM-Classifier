@@ -43,11 +43,75 @@ To set up the environment, follow these steps:
 
 ## Usage
 
-### 1. Configuration
-Modify the `src/config.py` file to set hyperparameters, dataset paths, and other configurations as needed. Key parameters include:
-- `data_path`: Path to the dataset directory.
-- `model_params`: Hyperparameters for the Gradient Boosting Classifier.
-- `distances`, `angles`, and `levels`: Parameters for GLCM feature extraction.
+## 1.Configuration
+
+The script uses a `Config` class to manage various settings for data loading, GLCM feature extraction, and model training.  You can adjust these parameters to suit your specific dataset and experimental needs.
+
+### Key Parameters
+
+* **`data_path`**:  
+    * Description:  Specifies the path to the dataset directory containing the image data.
+    * Default: `"path/to/your/dataset"`
+    * Usage:  Modify this to point to the actual location of your image files.
+
+* **`model_params`**:  
+    * Description:  A dictionary holding the hyperparameters for the LightGBM classifier.
+    * Keys:
+        * `"n_estimators"`:
+            * Description: The number of trees in the forest.
+            * Default: `300`
+        * `"learning_rate"`:
+            * Description: The step size at which the model learns.
+            * Default: `0.05`
+        * `"max_depth"`:
+            * Description: The maximum depth of the trees.
+            * Default: `4`
+        * `"random_state"`:
+            * Description:  Seed for random number generation. Ensures reproducibility.
+            * Default: `42`
+        * `"class_weight"`:
+            * Description: Weights associated with classes. `"balanced"` automatically adjusts weights inversely proportional to class frequencies in the input data.
+            * Default: `"balanced"`
+
+* **`distances`**:  
+    * Description: A list of pixel distances used in the Gray-Level Co-occurrence Matrix (GLCM) calculation.
+    * Default: `[1, 2, 3, 4, 5]`
+    * Usage:  These values determine how far apart pixel pairs are when calculating texture features.
+
+* **`angles`**:  
+    * Description: A list of angles (in radians) for GLCM calculation, specifying the direction between the pixel pairs.
+    * Default: `[0, np.pi/8, np.pi/4, 3*np.pi/8, np.pi/2, 5*np.pi/8, 3*np.pi/4, 7*np.pi/8]`
+    * Usage:  Defines the orientations to consider when analyzing texture.
+
+* **`levels`**:  
+    * Description: The number of gray levels used to quantize the image for GLCM computation.
+    * Default: `256`
+    * Usage:  Typically set to 256 for 8-bit images.
+
+* **`epochs`**:  
+    * Description: The number of times the entire training dataset is passed forward and backward through the neural network during training.
+    * Default: `10`
+
+* **`early_stopping_rounds`**:  
+    * Description: The number of training rounds without improvement on the validation set after which training will be stopped.
+    * Default: `10`
+
+* **`logging_level`**:  
+    * Description:  The level of detail in logging messages (e.g., "INFO", "DEBUG", "WARNING").
+    * Default: `"INFO"`
+
+###   Modifying the Configuration
+
+To customize the behavior of the scripts, modify the values within the `Config` class in `src/config.py`.  For example:
+
+```python
+from src.config import Config
+
+config = Config()
+config.data_path = "/path/to/my/images"
+config.model_params["n_estimators"] = 500
+config.angles = [0, np.pi/2]
+```
 
 ### 2. Training
 Run the training script to train the model:
@@ -85,23 +149,12 @@ data_path/
     ├── img6.png
     ├── annotations.json
 ```
-Each split directory (`train`, `val`, `test`) should contain images and a corresponding `annotations.json` file with the format:
-```json
-[
-    {"filename": "img1.png", "label": 0},
-    {"filename": "img2.png", "label": 1}
-]
-```
 
 ## Evaluation
 
-After training, you can evaluate the model's performance using the metrics provided in `src/utils/metrics.py`. Key functions include:
-- `calculate_accuracy`: Computes the accuracy of the model.
-- `calculate_f1_score`: Computes the F1 score (weighted).
-
-To evaluate the model:
-1. Run the evaluation script in the notebook or training script.
-2. View metrics such as accuracy and the classification report.
+Follow run the evaluate cell provided in the notebook. This will only work if:
+1. Your newly instantiated model just finished training.
+2. You created a new model instance and loaded your pre-trained weights.
 
 ## Contributing
 
@@ -113,11 +166,3 @@ Contributions are welcome! If you have suggestions or improvements, please:
 ## License
 
 This project is licensed under the MIT License. See the `LICENSE` file for more details.
-
-## Acknowledgments
-
-Special thanks to the contributors and open-source libraries that made this project possible:
-- `scikit-learn` for machine learning utilities.
-- `scikit-image` for GLCM feature extraction.
-- `tqdm` for progress tracking.
-- `opencv-python` for image processing.
