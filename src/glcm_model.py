@@ -17,10 +17,6 @@ class GLCMModel:
         self.config = config
         self.model = LGBMClassifier(
             **config.model_params,
-            max_depth=3,        # Limit tree depth
-            learning_rate=0.1,  # Reduce learning rate
-            n_estimators=100,   # Number of boosting stages
-            random_state=42     # For reproducibility
         )
         self.data = None
         self.mlb = None  # MultiLabelBinarizer instance
