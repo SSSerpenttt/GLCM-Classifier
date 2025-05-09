@@ -1,6 +1,6 @@
 import numpy as np
 # from sklearn.ensemble import GradientBoostingClassifier
-from lightgbm import LGBMClassifier  # Import LightGBM
+from lightgbm import LGBMClassifier, early_stopping
 from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import MultiLabelBinarizer
 from skimage.feature import graycomatrix, graycoprops
@@ -8,6 +8,7 @@ import cv2  # For image processing
 import joblib
 from tqdm import tqdm
 import matplotlib.pyplot as plt  # Add this import at the top of the file
+from joblib import Parallel, delayed
 
 class GLCMModel:
     def __init__(self, config):
@@ -23,62 +24,70 @@ class GLCMModel:
 
 
 
-
     def extract_glcm_features(self, images, rois=None):
         """
-        Extract GLCM features from a list of grayscale images, optionally using multiple ROIs.
+        Extract GLCM features from a list of grayscale images using parallel processing.
         Returns both the features and the indices of successfully processed ROIs.
         """
+        def process_roi(image, roi, img_idx, roi_idx):
+            x, y, w, h = map(int, roi)
+
+            # Clip ROI coordinates to fit within the image dimensions
+            x = max(0, min(x, image.shape[1] - 1))
+            y = max(0, min(y, image.shape[0] - 1))
+            w = max(1, min(w, image.shape[1] - x))  # Ensure width is at least 1
+            h = max(1, min(h, image.shape[0] - y))  # Ensure height is at least 1
+
+            cropped_image = image[y:y+h, x:x+w]
+
+            # Skip invalid ROIs
+            if cropped_image.size == 0:
+                return None, None
+
+            # Dynamically calculate GLCM parameters based on ROI size
+            min_dim = min(w, h)
+            distances = [1, max(1, min_dim // 4)]
+            angles = self.config.angles  # Access angles directly
+            levels = self.config.levels  # Access levels directly
+
+            # Extract GLCM features
+            glcm = graycomatrix(
+                cropped_image,
+                distances=distances,
+                angles=angles,
+                levels=levels,
+                symmetric=True,
+                normed=True,
+            )
+            contrast = graycoprops(glcm, 'contrast').flatten()
+            dissimilarity = graycoprops(glcm, 'dissimilarity').flatten()
+            homogeneity = graycoprops(glcm, 'homogeneity').flatten()
+            energy = graycoprops(glcm, 'energy').flatten()
+            correlation = graycoprops(glcm, 'correlation').flatten()
+            asm = graycoprops(glcm, 'ASM').flatten()
+
+            roi_features = np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm])
+            return roi_features, (img_idx, roi_idx)
+
+        # Flatten the input for parallel processing
+        tasks = []
+        for img_idx, image in enumerate(images):
+            if rois is not None and img_idx < len(rois):
+                for roi_idx, roi in enumerate(rois[img_idx]):
+                    tasks.append((image, roi, img_idx, roi_idx))
+
+        # Process ROIs in parallel
+        results = Parallel(n_jobs=-1)(
+            delayed(process_roi)(image, roi, img_idx, roi_idx) for image, roi, img_idx, roi_idx in tasks
+        )
+
+        # Collect features and valid ROI indices
         features = []
-        valid_roi_indices = []  # Track indices of successfully processed ROIs
-        for idx, image in enumerate(images):
-            if len(image.shape) == 3:  # Convert to grayscale if RGB
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-            if rois is not None and idx < len(rois):
-                for roi_idx, roi in enumerate(rois[idx]):
-                    x, y, w, h = map(int, roi)
-
-                    # Clip ROI coordinates to fit within the image dimensions
-                    x = max(0, min(x, image.shape[1] - 1))
-                    y = max(0, min(y, image.shape[0] - 1))
-                    w = max(1, min(w, image.shape[1] - x))  # Ensure width is at least 1
-                    h = max(1, min(h, image.shape[0] - y))  # Ensure height is at least 1
-
-                    cropped_image = image[y:y+h, x:x+w]
-
-                    # Skip invalid ROIs
-                    if cropped_image.size == 0:
-                        print(f"[Warning] Skipping empty ROI at index {idx}, ROI: {roi}")
-                        continue
-
-                    # Dynamically calculate GLCM parameters based on ROI size
-                    min_dim = min(w, h)
-                    distances = [1, max(1, min_dim // 4)]
-                    angles = self.config.angles  # Access angles directly
-                    levels = self.config.levels  # Access levels directly
-
-                    # Extract GLCM features
-                    glcm = graycomatrix(
-                        cropped_image,
-                        distances=distances,
-                        angles=angles,
-                        levels=levels,
-                        symmetric=True,
-                        normed=True,
-                    )
-                    contrast = graycoprops(glcm, 'contrast').flatten()
-                    dissimilarity = graycoprops(glcm, 'dissimilarity').flatten()
-                    homogeneity = graycoprops(glcm, 'homogeneity').flatten()
-                    energy = graycoprops(glcm, 'energy').flatten()
-                    correlation = graycoprops(glcm, 'correlation').flatten()
-                    asm = graycoprops(glcm, 'ASM').flatten()
-
-                    roi_features = np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm])
-                    features.append(roi_features)
-                    valid_roi_indices.append((idx, roi_idx))  # Track valid ROI indices
-            else:
-                print(f"[Warning] No ROIs provided for image index {idx}")
+        valid_roi_indices = []
+        for feature, valid_index in results:
+            if feature is not None:
+                features.append(feature)
+                valid_roi_indices.append(valid_index)
 
         return np.array(features), valid_roi_indices
 
