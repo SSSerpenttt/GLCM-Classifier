@@ -392,8 +392,7 @@ class GLCMModel:
         """
         save_data = {
             "model": self.model,
-            "mlb": self.mlb,
-            "config": self.config
+            "mlb": self.mlb
         }
         joblib.dump(save_data, filepath)
         print(f"Model, config, and MultiLabelBinarizer saved to {filepath}")
