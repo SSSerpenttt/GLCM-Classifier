@@ -362,13 +362,15 @@ class GLCMModel:
             plt.figure(figsize=(10, 10))
             plt.imshow(image, cmap="gray")
             plt.title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
-            for roi, gt_label, pred_label in zip(image_rois, ground_truth_labels, predicted_labels):
-                x, y, w, h = roi
+            for roi_idx, (roi, gt_label, pred_label) in enumerate(zip(image_rois, ground_truth_labels, predicted_labels)):
+                x, y, w, h = map(int, roi)
+                gt_label_name = self.mlb.classes_[gt_label]  # Get the actual label name
+                pred_label_name = self.mlb.classes_[pred_label] # Get the predicted label name
                 color = "green" if gt_label == pred_label else "red"
                 plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=2))
                 plt.text(
                     x, y - 5,
-                    f"GT: {gt_label}\nPred: {pred_label}",
+                    f"GT: {gt_label_name}\nPred: {pred_label_name}",
                     color=color,
                     fontsize=8,
                     bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
@@ -377,7 +379,7 @@ class GLCMModel:
             plt.show()
 
         # Return accuracy, report, and predictions
-        return accuracy, report, predictions
+        return
 
 
     def save_model(self, filepath):
