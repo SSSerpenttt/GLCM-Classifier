@@ -388,14 +388,14 @@ class GLCMModel:
 
     def save_model(self, filepath):
         """
-        Save the trained model, MultiLabelBinarizer, and config.
+        Save the trained model and MultiLabelBinarizer only (no config).
         """
         save_data = {
             "model": self.model,
             "mlb": self.mlb
         }
         joblib.dump(save_data, filepath)
-        print(f"Model, config, and MultiLabelBinarizer saved to {filepath}")
+        print(f"Model and MultiLabelBinarizer saved to {filepath}")
 
     def load_model(self, filepath):
         """
