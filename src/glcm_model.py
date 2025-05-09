@@ -176,7 +176,7 @@ class GLCMModel:
             train_labels,
             eval_set=[(val_features, val_labels)],  # Validation data for early stopping
             eval_metric="logloss",                 # Evaluation metric
-            early_stopping_rounds=self.config.early_stopping_rounds,  # Early stopping
+            callbacks=[early_stopping(self.config.early_stopping_rounds)],  # Early stopping callback
             verbose=True                           # Display training progress
         )
         print("Training completed.")
