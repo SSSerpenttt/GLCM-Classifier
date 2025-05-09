@@ -1,3 +1,4 @@
+lightgbm
 tqdm
 tensorflow>=2.13.0
 numpy==1.23.5

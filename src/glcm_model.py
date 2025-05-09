@@ -1,5 +1,6 @@
 import numpy as np
-from sklearn.ensemble import GradientBoostingClassifier
+# from sklearn.ensemble import GradientBoostingClassifier
+from lightgbm import LGBMClassifier  # Import LightGBM
 from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import MultiLabelBinarizer
 from skimage.feature import graycomatrix, graycoprops
@@ -14,30 +15,56 @@ class GLCMModel:
         Initialize the GLCMModel with a configuration object.
         """
         self.config = config
-        self.model = GradientBoostingClassifier(**config.model_params)
+        self.model = LGBMClassifier(
+            **config.model_params,
+            max_depth=3,        # Limit tree depth
+            learning_rate=0.1,  # Reduce learning rate
+            n_estimators=100,   # Number of boosting stages
+            random_state=42     # For reproducibility
+        )
         self.data = None
         self.mlb = None  # MultiLabelBinarizer instance
 
     def extract_glcm_features(self, images, rois=None):
         """
         Extract GLCM features from a list of grayscale images, optionally using multiple ROIs.
+        Returns both the features and the indices of successfully processed ROIs.
         """
         features = []
+        valid_roi_indices = []  # Track indices of successfully processed ROIs
         for idx, image in enumerate(images):
             if len(image.shape) == 3:  # Convert to grayscale if RGB
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
             if rois is not None and idx < len(rois):
-                image_features = []
-                for roi in rois[idx]:
+                for roi_idx, roi in enumerate(rois[idx]):
                     x, y, w, h = map(int, roi)
+
+                    # Clip ROI coordinates to fit within the image dimensions
+                    x = max(0, min(x, image.shape[1] - 1))
+                    y = max(0, min(y, image.shape[0] - 1))
+                    w = max(1, min(w, image.shape[1] - x))  # Ensure width is at least 1
+                    h = max(1, min(h, image.shape[0] - y))  # Ensure height is at least 1
+
                     cropped_image = image[y:y+h, x:x+w]
 
+                    # Skip invalid ROIs
+                    if cropped_image.size == 0:
+                        print(f"[Warning] Skipping empty ROI at index {idx}, ROI: {roi}")
+                        continue
+
+                    # Dynamically calculate GLCM parameters based on ROI size
+                    min_dim = min(w, h)
+                    distances = [1, max(1, min_dim // 4)]
+                    angles = self.config.get("angles", [0, np.pi/4, np.pi/2, 3*np.pi/4])
+                    levels = self.config.get("levels", 256)
+
+                    # Extract GLCM features
                     glcm = graycomatrix(
                         cropped_image,
-                        distances=self.config.distances,
-                        angles=self.config.angles,
-                        levels=self.config.levels,
+                        distances=distances,
+                        angles=angles,
+                        levels=levels,
                         symmetric=True,
                         normed=True,
                     )
@@ -49,29 +76,14 @@ class GLCMModel:
                     asm = graycoprops(glcm, 'ASM').flatten()
 
                     roi_features = np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm])
-                    image_features.append(roi_features)
-
-                features.append(np.mean(image_features, axis=0))
+                    features.append(roi_features)
+                    valid_roi_indices.append((idx, roi_idx))  # Track valid ROI indices
             else:
-                glcm = graycomatrix(
-                    image,
-                    distances=self.config.distances,
-                    angles=self.config.angles,
-                    levels=self.config.levels,
-                    symmetric=True,
-                    normed=True,
-                )
-                contrast = graycoprops(glcm, 'contrast').flatten()
-                dissimilarity = graycoprops(glcm, 'dissimilarity').flatten()
-                homogeneity = graycoprops(glcm, 'homogeneity').flatten()
-                energy = graycoprops(glcm, 'energy').flatten()
-                correlation = graycoprops(glcm, 'correlation').flatten()
-                asm = graycoprops(glcm, 'ASM').flatten()
-                features.append(np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm]))
+                print(f"[Warning] No ROIs provided for image index {idx}")
 
-        return np.array(features)
+        return np.array(features), valid_roi_indices
 
-    def preprocess_labels(self, labels):
+    def preprocess_labels(self, labels, flatten=True):
         """
         Preprocess labels using MultiLabelBinarizer for multi-label data.
         """
@@ -81,8 +93,7 @@ class GLCMModel:
         else:
             labels = self.mlb.transform(labels)
 
-        # Flatten labels for multi-class classification if necessary
-        if len(labels.shape) > 1 and labels.shape[1] > 1:
+        if flatten and len(labels.shape) > 1 and labels.shape[1] > 1:
             labels = np.argmax(labels, axis=1)
 
         return labels
@@ -156,7 +167,14 @@ class GLCMModel:
 
         with tqdm(total=epochs, desc="Training Progress", unit="epoch") as pbar:
             for epoch in range(epochs):
-                self.model.fit(train_features, train_labels)
+                self.model.fit(
+                    train_features,
+                    train_labels,
+                    eval_set=[(val_features, val_labels)],
+                    eval_metric="logloss",
+                    early_stopping_rounds=10,
+                    verbose=True,
+                )
 
                 val_predictions = self.model.predict(val_features)
                 accuracy = accuracy_score(val_labels, val_predictions)
@@ -197,31 +215,28 @@ class GLCMModel:
     def evaluate(self, test_data):
         """
         Evaluate the model's performance on test data and display example predictions with visualizations.
-        Displays images with their ROIs and the predicted labels for each ROI.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before evaluation.")
 
         print("Extracting GLCM features for test data...")
         test_features = []
-        roi_indices = []  # To track which ROIs belong to which image
+        valid_roi_indices = []  # Track valid ROI indices
         for idx in tqdm(range(len(test_data["images"])), desc="Testing Progress"):
-            features = self.extract_glcm_features([test_data["images"][idx]], [test_data["rois"][idx]])
-            test_features.extend(features)  # Add features for all ROIs in the image
-            roi_indices.extend([idx] * len(features))  # Track the image index for each ROI
+            features, valid_indices = self.extract_glcm_features([test_data["images"][idx]], [test_data["rois"][idx]])
+            test_features.extend(features)
+            valid_roi_indices.extend(valid_indices)
 
         test_features = np.array(test_features)
 
         print(f"[Debug] Extracted test features shape: {test_features.shape}")
         print(f"[Debug] Total ROI predictions expected: {len(test_features)}")
 
-        # Flatten ground truth labels to match the ROI-level predictions
+        # Align ground truth labels with valid ROIs
         test_labels = []
-        for labels in test_data["labels"]:
-            if isinstance(labels, list):
-                test_labels.extend(labels)  # Add all labels for this image
-            else:
-                test_labels.append(labels)  # Add a single label if not a list
+        for img_idx, roi_idx in valid_roi_indices:
+            test_labels.append(test_data["labels"][img_idx][roi_idx])
+
         test_labels = self.preprocess_labels(test_labels)
 
         # Debugging: Check test labels
@@ -257,68 +272,23 @@ class GLCMModel:
         plt.title("Confusion Matrix")
         plt.show()
 
-        # Group predictions by image index for visualization
-        from collections import defaultdict
-        grouped_predictions = defaultdict(list)
-        for idx, image_idx in enumerate(roi_indices):
-            grouped_predictions[image_idx].append(predictions[idx])
-
-        print(f"[Debug] Unique image indices with predictions: {list(grouped_predictions.keys())[:5]}")
-
-        # Visualize predictions for three random images
-        print("\nDisplaying Predictions for Random Images:")
-        import random
-        random_indices = random.sample(range(len(test_data["images"])), 3)
-
-        for i, idx in enumerate(random_indices):
-            image = test_data["images"][idx]
-
-            plt.figure(figsize=(8, 8))
-            plt.imshow(image, cmap="gray")
-
-            preds_for_image = grouped_predictions.get(idx, [])
-            if len(preds_for_image) == 0:
-                print(f"[Warning] No predictions found for image index {idx}")
-            else:
-                print(f"[Info] Found {len(preds_for_image)} predictions for image {idx}")
-
-            for j, roi in enumerate(test_data["rois"][idx]):
-                x, y, w, h = map(int, roi)
-
-                if j < len(preds_for_image):
-                    predicted_class_index = preds_for_image[j]
-                    try:
-                        predicted_label = self.mlb.classes_[predicted_class_index]
-                    except IndexError:
-                        predicted_label = f"(Invalid Index: {predicted_class_index})"
-                        print(f"[Error] IndexError for predicted class: {predicted_class_index}")
-                else:
-                    predicted_label = "(No Prediction)"
-                    print(f"[Warning] Missing prediction for ROI #{j} in image {idx}")
-
-                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor="red", facecolor="none", lw=2, linestyle="--"))
-                plt.text(x, y + h + 5, f"Pred: {predicted_label}", color="red", fontsize=10,
-                        bbox=dict(facecolor="white", alpha=0.5))
-
-            plt.title(f"Image {i + 1}: Predictions")
-            plt.axis("off")
-            plt.show()
-
         return accuracy, report
 
 
     def save_model(self, filepath):
         """
-        Save the trained model to a file.
+        Save the trained model and MultiLabelBinarizer to a file.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before saving.")
-        joblib.dump(self.model, filepath)
-        print(f"Model saved to {filepath}")
+        joblib.dump({"model": self.model, "mlb": self.mlb}, filepath)
+        print(f"Model and MultiLabelBinarizer saved to {filepath}")
 
     def load_model(self, filepath):
         """
-        Load a trained model from a file.
+        Load a trained model and MultiLabelBinarizer from a file.
         """
-        self.model = joblib.load(filepath)
-        print(f"Model loaded from {filepath}")
+        data = joblib.load(filepath)
+        self.model = data["model"]
+        self.mlb = data["mlb"]
+        print(f"Model and MultiLabelBinarizer loaded from {filepath}")
