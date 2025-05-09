@@ -116,7 +116,6 @@ class GLCMModel:
         """
         Load data using the provided data loader.
         Extract GLCM features for each ROI and associate them with labels.
-        Includes tqdm progress bars for loading and feature extraction.
         """
         print("Loading data...")
         self.data = data_loader.load_data()
@@ -124,74 +123,135 @@ class GLCMModel:
         # Extract features for training data
         print("Extracting GLCM features for training data...")
         train_images = self.data['train_images']
-        train_rois = self.data['train_rois']  # List of bounding boxes for each image
+        train_rois = self.data['train_rois']
         train_features = []
+        train_valid_indices = []
+        
         for idx in tqdm(range(len(train_images)), desc="Training Data Progress"):
-            train_features.append(self.extract_glcm_features([train_images[idx]], [train_rois[idx]]))
-        self.data['train_features'] = np.array(train_features).squeeze()
-        self.data['train_labels'] = self.data['train_labels']
+            features, valid_indices = self.extract_glcm_features([train_images[idx]], [train_rois[idx]])
+            if len(features) > 0:
+                train_features.extend(features)
+                train_valid_indices.extend(valid_indices)
+        
+        # Ensure one-to-one mapping between features and labels
+        aligned_train_labels = []
+        for img_idx, roi_idx in train_valid_indices:
+            if img_idx < len(self.data['train_labels']) and roi_idx < len(self.data['train_labels'][img_idx]):
+                aligned_train_labels.append(self.data['train_labels'][img_idx][roi_idx])
+        
+        self.data['train_features'] = np.array(train_features)
+        self.data['train_labels'] = np.array(aligned_train_labels)
 
-        # Extract features for validation data
+        # Similar process for validation data
         print("Extracting GLCM features for validation data...")
         val_images = self.data['val_images']
         val_rois = self.data['val_rois']
         val_features = []
+        val_valid_indices = []
+        
         for idx in tqdm(range(len(val_images)), desc="Validation Data Progress"):
-            val_features.append(self.extract_glcm_features([val_images[idx]], [val_rois[idx]]))
-        self.data['val_features'] = np.array(val_features).squeeze()
-        self.data['val_labels'] = self.data['val_labels']
+            features, valid_indices = self.extract_glcm_features([val_images[idx]], [val_rois[idx]])
+            if len(features) > 0:
+                val_features.extend(features)
+                val_valid_indices.extend(valid_indices)
+        
+        # Align validation labels
+        aligned_val_labels = []
+        for img_idx, roi_idx in val_valid_indices:
+            if img_idx < len(self.data['val_labels']) and roi_idx < len(self.data['val_labels'][img_idx]):
+                aligned_val_labels.append(self.data['val_labels'][img_idx][roi_idx])
+        
+        self.data['val_features'] = np.array(val_features)
+        self.data['val_labels'] = np.array(aligned_val_labels)
 
-        # Extract features for test data
-        print("Extracting GLCM features for test data...")
-        test_images = self.data['test_images']
-        test_rois = self.data['test_rois']
-        test_features = []
-        for idx in tqdm(range(len(test_images)), desc="Test Data Progress"):
-            test_features.append(self.extract_glcm_features([test_images[idx]], [test_rois[idx]]))
-        self.data['test_features'] = np.array(test_features).squeeze()
-        self.data['test_labels'] = self.data['test_labels']
+        # Debug information
+        print(f"Training features shape: {self.data['train_features'].shape}")
+        print(f"Training labels shape: {self.data['train_labels'].shape}")
+        print(f"Validation features shape: {self.data['val_features'].shape}")
+        print(f"Validation labels shape: {self.data['val_labels'].shape}")
 
         print("Data loading and feature extraction completed.")
-
 
 
 
     def train(self, train_data, val_data):
         """
         Train the model using the provided training and validation data.
-        Implements early stopping based on validation accuracy.
+        Ensures one-to-one mapping between ROIs/labels and GLCM features.
         """
         print("Extracting GLCM features for training data...")
         train_features = []
+        train_labels = []
+        
+        # Debug: Print initial counts
+        print(f"Number of training images: {len(train_data['images'])}")
+        print(f"Number of training ROIs: {sum(len(rois) for rois in train_data['rois'])}")
+        
+        # Process each image and its ROIs
         for idx in tqdm(range(len(train_data["images"])), desc="Training GLCM Extraction"):
-            features, _ = self.extract_glcm_features([train_data["images"][idx]], [train_data.get("rois", [])[idx]])
-            train_features.extend(features)
-        train_features = np.array(train_features)
+            image = train_data["images"][idx]
+            rois = train_data["rois"][idx]
+            image_labels = train_data["labels"][idx]
+            
+            # Extract features for all ROIs in this image
+            features, valid_indices = self.extract_glcm_features([image], [rois])
+            
+            # Create feature-label pairs ensuring one-to-one mapping
+            for feature, (_, roi_idx) in zip(features, valid_indices):
+                if roi_idx < len(image_labels):
+                    train_features.append(feature)
+                    train_labels.append(image_labels[roi_idx])
+                else:
+                    print(f"Warning: Skipping ROI {roi_idx} in image {idx} - no corresponding label")
 
+        train_features = np.array(train_features)
+        train_labels = np.array(train_labels)
+        
+        # Debug: Print shapes before preprocessing
+        print(f"Shape of train_features before preprocessing: {train_features.shape}")
+        print(f"Shape of train_labels before preprocessing: {train_labels.shape}")
+        
+        train_labels = self.preprocess_labels(train_labels)
+        
+        # Debug: Print final shapes
+        print(f"Final shape of train_features: {train_features.shape}")
+        print(f"Final shape of train_labels: {train_labels.shape}")
+        
+        # Similar process for validation data
         print("Extracting GLCM features for validation data...")
         val_features = []
+        val_labels = []
+        
         for idx in tqdm(range(len(val_data["images"])), desc="Validation GLCM Extraction"):
-            features, _ = self.extract_glcm_features([val_data["images"][idx]], [val_data.get("rois", [])[idx]])
-            val_features.extend(features)
-        val_features = np.array(val_features)
+            image = val_data["images"][idx]
+            rois = val_data["rois"][idx]
+            image_labels = val_data["labels"][idx]
+            
+            features, valid_indices = self.extract_glcm_features([image], [rois])
+            
+            for feature, (_, roi_idx) in zip(features, valid_indices):
+                if roi_idx < len(image_labels):
+                    val_features.append(feature)
+                    val_labels.append(image_labels[roi_idx])
 
-        # Preprocess labels
-        train_labels = self.preprocess_labels(train_data["labels"])
-        val_labels = self.preprocess_labels(val_data["labels"])
+        val_features = np.array(val_features)
+        val_labels = self.preprocess_labels(val_labels)
+
+        print(f"Shape of val_features: {val_features.shape}")
+        print(f"Shape of val_labels: {val_labels.shape}")
 
         print("Starting training...")
         self.model.fit(
             train_features,
             train_labels,
-            eval_set=[(val_features, val_labels)],  # Validation data for early stopping
-            eval_metric="logloss",                 # Evaluation metric
+            eval_set=[(val_features, val_labels)],
+            eval_metric="logloss",
             callbacks=[
                 early_stopping(self.config.early_stopping_rounds),
-                log_evaluation(period=1) 
+                log_evaluation(period=1)
             ]
         )
         print("Training completed.")
-
 
 
 
