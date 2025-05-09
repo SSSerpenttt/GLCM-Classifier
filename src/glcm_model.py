@@ -1,6 +1,6 @@
 import numpy as np
 # from sklearn.ensemble import GradientBoostingClassifier
-from lightgbm import LGBMClassifier, early_stopping
+from lightgbm import LGBMClassifier, early_stopping, verbose
 from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import MultiLabelBinarizer
 from skimage.feature import graycomatrix, graycoprops
@@ -185,8 +185,10 @@ class GLCMModel:
             train_labels,
             eval_set=[(val_features, val_labels)],  # Validation data for early stopping
             eval_metric="logloss",                 # Evaluation metric
-            callbacks=[early_stopping(self.config.early_stopping_rounds)],  # Early stopping callback
-            verbose=True                           # Display training progress
+            callbacks=[
+                early_stopping(self.config.early_stopping_rounds),
+                log_evaluation(period=1) 
+            ]
         )
         print("Training completed.")
 
