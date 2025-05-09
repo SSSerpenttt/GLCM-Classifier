@@ -384,11 +384,13 @@ class GLCMModel:
 
     def save_model(self, filepath):
         """
-        Save the trained model and MultiLabelBinarizer to a file.
+        Save the trained model and MultiLabelBinarizer to a pickle file.
         """
-        if self.model is None:
-            raise ValueError("Model is not trained yet. Train the model before saving.")
-        joblib.dump({"model": self.model, "mlb": self.mlb}, filepath)
+        save_data = {
+            "model": self.model,
+            "mlb": self.mlb
+        }
+        joblib.dump(save_data, filepath)
         print(f"Model and MultiLabelBinarizer saved to {filepath}")
 
     def load_model(self, filepath):
