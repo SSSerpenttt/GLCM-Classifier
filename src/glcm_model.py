@@ -143,14 +143,16 @@ class GLCMModel:
         print("Extracting GLCM features for training data...")
         train_features = []
         for idx in tqdm(range(len(train_data["images"])), desc="Training GLCM Extraction"):
-            train_features.append(self.extract_glcm_features([train_data["images"][idx]], [train_data.get("rois", [])[idx]]))
-        train_features = np.array(train_features).squeeze()
+            features, _ = self.extract_glcm_features([train_data["images"][idx]], [train_data.get("rois", [])[idx]])
+            train_features.extend(features)  # Flatten the list of feature arrays
+        train_features = np.array(train_features)  # Convert to a NumPy array
 
         print("Extracting GLCM features for validation data...")
         val_features = []
         for idx in tqdm(range(len(val_data["images"])), desc="Validation GLCM Extraction"):
-            val_features.append(self.extract_glcm_features([val_data["images"][idx]], [val_data.get("rois", [])[idx]]))
-        val_features = np.array(val_features).squeeze()
+            features, _ = self.extract_glcm_features([val_data["images"][idx]], [val_data.get("rois", [])[idx]])
+            val_features.extend(features)  # Flatten the list of feature arrays
+        val_features = np.array(val_features)  # Convert to a NumPy array
 
         # Preprocess labels
         train_labels = self.preprocess_labels(train_data["labels"])
@@ -161,6 +163,7 @@ class GLCMModel:
         patience = max(5, int(len(train_data["images"]) / 100))
         patience_counter = 0
 
+        print("Starting training...")
         with tqdm(total=epochs, desc="Training Progress", unit="epoch") as pbar:
             for epoch in range(epochs):
                 self.model.fit(
@@ -168,7 +171,7 @@ class GLCMModel:
                     train_labels,
                     eval_set=[(val_features, val_labels)],
                     eval_metric="logloss",
-                    early_stopping_rounds=10,
+                    early_stopping_rounds=self.config.early_stopping_rounds,
                     verbose=True,
                 )
 
@@ -189,7 +192,7 @@ class GLCMModel:
                 if patience_counter >= patience:
                     print("Early stopping triggered.")
                     break
-
+                    
     def predict(self, input_data, rois=None):
         """
         Make predictions using the trained model.
