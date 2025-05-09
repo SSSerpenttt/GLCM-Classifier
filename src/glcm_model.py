@@ -1,6 +1,6 @@
 import numpy as np
 # from sklearn.ensemble import GradientBoostingClassifier
-from lightgbm import LGBMClassifier, early_stopping, verbose
+from lightgbm import LGBMClassifier, early_stopping
 from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import MultiLabelBinarizer
 from skimage.feature import graycomatrix, graycoprops
