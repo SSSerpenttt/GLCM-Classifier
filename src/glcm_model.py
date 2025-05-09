@@ -388,7 +388,6 @@ class GLCMModel:
 
 
     def save_model(self, filepath):
-            def save_model(self, filepath):
         """
         Save the trained model and MultiLabelBinarizer to a pickle file.
         """
