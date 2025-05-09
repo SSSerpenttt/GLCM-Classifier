@@ -402,6 +402,6 @@ class GLCMModel:
         Load a trained model and MultiLabelBinarizer from a file.
         """
         data = joblib.load(filepath)
-        self.model = data["model"]
+        self.data = data["model"]
         self.mlb = data["mlb"]
         print(f"Model and MultiLabelBinarizer loaded from {filepath}")
