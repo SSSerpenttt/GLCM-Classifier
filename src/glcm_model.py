@@ -21,6 +21,9 @@ class GLCMModel:
         self.data = None
         self.mlb = None  # MultiLabelBinarizer instance
 
+
+
+
     def extract_glcm_features(self, images, rois=None):
         """
         Extract GLCM features from a list of grayscale images, optionally using multiple ROIs.
@@ -79,6 +82,9 @@ class GLCMModel:
 
         return np.array(features), valid_roi_indices
 
+
+
+
     def preprocess_labels(self, labels, flatten=True):
         """
         Preprocess labels using MultiLabelBinarizer for multi-label data.
@@ -93,6 +99,9 @@ class GLCMModel:
             labels = np.argmax(labels, axis=1)
 
         return labels
+
+
+
 
     def load_data(self, data_loader):
         """
@@ -135,6 +144,9 @@ class GLCMModel:
 
         print("Data loading and feature extraction completed.")
 
+
+
+
     def train(self, train_data, val_data):
         """
         Train the model using the provided training and validation data.
@@ -169,61 +181,94 @@ class GLCMModel:
         )
         print("Training completed.")
 
-    def evaluate(self, test_data):
+
+
+
+    def predict(self, images, rois):
         """
-        Evaluate the model's performance on test data and display example predictions with visual comparisons.
+        Make predictions using the trained model.
+        The model will infer depth labels for each ROI based on GLCM features.
+
+        Args:
+            images (list or np.array): List or array of grayscale images to predict on.
+            rois (list): List of ROIs for each image.
+
+        Returns:
+            dict: A dictionary containing predictions, ROIs, and images.
         """
         if self.model is None:
-            raise ValueError("Model is not trained yet. Train the model before evaluation.")
+            raise ValueError("Model is not trained yet. Train the model before making predictions.")
 
-        print("Extracting GLCM features for test data...")
-        test_features = []
+        print("Extracting GLCM features for the specified data...")
+        input_features = []
         valid_roi_indices = []  # Track valid ROI indices
-        for idx in tqdm(range(len(test_data["images"])), desc="Testing Progress"):
-            features, valid_indices = self.extract_glcm_features([test_data["images"][idx]], [test_data["rois"][idx]])
-            test_features.extend(features)
+        for idx in tqdm(range(len(images)), desc="Prediction Progress"):
+            features, valid_indices = self.extract_glcm_features([images[idx]], [rois[idx]])
+            input_features.extend(features)
             valid_roi_indices.extend(valid_indices)
 
-        test_features = np.array(test_features)
+        input_features = np.array(input_features)
 
-        print(f"[Debug] Extracted test features shape: {test_features.shape}")
-        print(f"[Debug] Total ROI predictions expected: {len(test_features)}")
+        print(f"[Debug] Extracted input features shape: {input_features.shape}")
+        print(f"[Debug] Total ROI predictions expected: {len(input_features)}")
+
+        # Predict depth labels for all ROIs
+        predictions = self.model.predict(input_features)
+
+        # Map predictions back to their corresponding images and ROIs
+        mapped_predictions = [[] for _ in range(len(images))]
+        for (img_idx, roi_idx), prediction in zip(valid_roi_indices, predictions):
+            mapped_predictions[img_idx].append(prediction)
+
+        # Return predictions mapped to images and ROIs
+        return {
+            "predictions": mapped_predictions,  # List of lists of predictions for each image
+            "rois": rois,                       # Original ROIs from input data
+            "images": images                    # Original images from input data
+        }    
+
+
+
+
+    def evaluate(self, images, rois, labels):
+        """
+        Evaluate the model's performance on the specified images and ROIs.
+        Displays example predictions with visual comparisons.
+        Returns accuracy, classification report, and predictions.
+
+        Args:
+            images (list or np.array): List or array of grayscale images to evaluate.
+            rois (list): List of ROIs for each image.
+            labels (list): Ground truth labels for the ROIs.
+        """
+        predictions_data = self.predict(images, rois)
+        predictions = predictions_data["predictions"]
 
         # Align ground truth labels with valid ROIs
+        valid_roi_indices = []
+        for idx, roi_list in enumerate(rois):
+            valid_roi_indices.extend([(idx, roi_idx) for roi_idx in range(len(roi_list))])
+
         test_labels = []
         for img_idx, roi_idx in valid_roi_indices:
-            test_labels.append(test_data["labels"][img_idx][roi_idx])
+            test_labels.append(labels[img_idx][roi_idx])
 
         test_labels = self.preprocess_labels(test_labels)
 
-        # Debugging: Check test labels
-        print(f"[Debug] Flattened test labels: {test_labels[:10]}")
-        print(f"[Debug] Number of test labels: {len(test_labels)}")
-
-        # Predict depth labels for all ROIs
-        predictions = self.model.predict(test_features)
-
-        # Debugging: Check predictions
-        print(f"[Debug] Predictions shape: {predictions.shape}")
-        print(f"[Debug] First 5 predictions: {predictions[:5]}")
-        print(f"[Debug] Number of predictions: {len(predictions)}")
-        print(f"[Debug] Label classes: {getattr(self.mlb, 'classes_', 'Not Set')}")
-
-        # Ensure the number of predictions matches the number of test labels
-        if len(predictions) != len(test_labels):
-            raise ValueError(f"Mismatch between predictions ({len(predictions)}) and test labels ({len(test_labels)})")
+        # Flatten predictions for evaluation
+        flat_predictions = [pred for preds in predictions for pred in preds]
 
         # Calculate accuracy
-        accuracy = accuracy_score(test_labels, predictions)
+        accuracy = accuracy_score(test_labels, flat_predictions)
         print(f"Test Accuracy: {accuracy:.2f}")
 
         # Classification report
-        report = classification_report(test_labels, predictions, target_names=self.mlb.classes_)
+        report = classification_report(test_labels, flat_predictions, target_names=self.mlb.classes_)
         print("Classification Report:\n", report)
 
         # Confusion Matrix
         print("\nConfusion Matrix:")
-        cm = confusion_matrix(test_labels, predictions)
+        cm = confusion_matrix(test_labels, flat_predictions)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.mlb.classes_)
         disp.plot(cmap="Blues", xticks_rotation="vertical")
         plt.title("Confusion Matrix")
@@ -231,25 +276,17 @@ class GLCMModel:
 
         # Visualize predictions vs ground truth
         print("Visualizing predictions vs ground truth...")
-        for img_idx in range(min(5, len(test_data["images"]))):  # Show up to 5 images
-            image = test_data["images"][img_idx]
-            rois = test_data["rois"][img_idx]
-            ground_truth_labels = test_data["labels"][img_idx]
-            predicted_labels = []
-
-            # Collect predictions for the current image
-            for roi_idx, roi in enumerate(rois):
-                if (img_idx, roi_idx) in valid_roi_indices:
-                    pred_idx = valid_roi_indices.index((img_idx, roi_idx))
-                    predicted_labels.append(predictions[pred_idx])
-                else:
-                    predicted_labels.append("N/A")  # No prediction for invalid ROI
+        for img_idx in range(min(5, len(images))):  # Show up to 5 images
+            image = images[img_idx]
+            image_rois = rois[img_idx]
+            ground_truth_labels = labels[img_idx]
+            predicted_labels = predictions[img_idx]
 
             # Plot the image with ROIs and labels
             plt.figure(figsize=(10, 10))
             plt.imshow(image, cmap="gray")
             plt.title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
-            for roi, gt_label, pred_label in zip(rois, ground_truth_labels, predicted_labels):
+            for roi, gt_label, pred_label in zip(image_rois, ground_truth_labels, predicted_labels):
                 x, y, w, h = roi
                 color = "green" if gt_label == pred_label else "red"
                 plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=2))
@@ -263,7 +300,8 @@ class GLCMModel:
             plt.axis("off")
             plt.show()
 
-        return accuracy, report
+        # Return accuracy, report, and predictions
+        return accuracy, report, predictions
 
 
     def save_model(self, filepath):
