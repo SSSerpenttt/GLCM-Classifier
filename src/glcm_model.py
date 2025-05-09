@@ -216,15 +216,30 @@ class GLCMModel:
         print(f"[Debug] Total ROI predictions expected: {len(test_features)}")
 
         # Flatten ground truth labels to match the ROI-level predictions
-        test_labels = [label for labels in test_data["labels"] for label in labels]
+        test_labels = []
+        for labels in test_data["labels"]:
+            if isinstance(labels, list):
+                test_labels.extend(labels)  # Add all labels for this image
+            else:
+                test_labels.append(labels)  # Add a single label if not a list
         test_labels = self.preprocess_labels(test_labels)
+
+        # Debugging: Check test labels
+        print(f"[Debug] Flattened test labels: {test_labels[:10]}")
+        print(f"[Debug] Number of test labels: {len(test_labels)}")
 
         # Predict depth labels for all ROIs
         predictions = self.model.predict(test_features)
 
+        # Debugging: Check predictions
         print(f"[Debug] Predictions shape: {predictions.shape}")
         print(f"[Debug] First 5 predictions: {predictions[:5]}")
+        print(f"[Debug] Number of predictions: {len(predictions)}")
         print(f"[Debug] Label classes: {getattr(self.mlb, 'classes_', 'Not Set')}")
+
+        # Ensure the number of predictions matches the number of test labels
+        if len(predictions) != len(test_labels):
+            raise ValueError(f"Mismatch between predictions ({len(predictions)}) and test labels ({len(test_labels)})")
 
         # Calculate accuracy
         accuracy = accuracy_score(test_labels, predictions)
