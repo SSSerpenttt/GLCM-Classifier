@@ -320,57 +320,58 @@ class GLCMModel:
         predictions_data = self.predict(images, rois)
         predictions = predictions_data["predictions"]
 
-        # Align ground truth labels with valid ROIs
+        # Align ground truth labels with valid ROIs and preprocess them
         valid_roi_indices = []
+        original_gt_labels = []
         for idx, roi_list in enumerate(rois):
-            valid_roi_indices.extend([(idx, roi_idx) for roi_idx in range(len(roi_list))])
+            for roi_idx in range(len(roi_list)):
+                valid_roi_indices.append((idx, roi_idx))
+                original_gt_labels.append(labels[idx][roi_idx])
 
-        test_labels = []
-        for img_idx, roi_idx in valid_roi_indices:
-            test_labels.append(labels[img_idx][roi_idx])
-
-        test_labels = self.preprocess_labels(test_labels)
+        test_labels_numerical = self.preprocess_labels(original_gt_labels)
 
         # Flatten predictions for evaluation
         flat_predictions = [pred for preds in predictions for pred in preds]
 
         # Calculate accuracy
-        accuracy = accuracy_score(test_labels, flat_predictions)
+        accuracy = accuracy_score(test_labels_numerical, flat_predictions)
         print(f"Test Accuracy: {accuracy:.2f}")
 
         # Classification report
-        report = classification_report(test_labels, flat_predictions, target_names=self.mlb.classes_)
+        report = classification_report(test_labels_numerical, flat_predictions, target_names=self.mlb.classes_)
         print("Classification Report:\n", report)
 
         # Confusion Matrix
         print("\nConfusion Matrix:")
-        cm = confusion_matrix(test_labels, flat_predictions)
+        cm = confusion_matrix(test_labels_numerical, flat_predictions)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.mlb.classes_)
         disp.plot(cmap="Blues", xticks_rotation="vertical")
         plt.title("Confusion Matrix")
         plt.show()
 
         # Calculate mAP
-        average_precision = average_precision_score(test_labels, flat_predictions)
+        average_precision = average_precision_score(test_labels_numerical, flat_predictions)
         print(f"Mean Average Precision (mAP): {average_precision:.2f}")
 
         # Visualize predictions vs ground truth
         print("Visualizing predictions vs ground truth...")
+        roi_counter = 0
         for img_idx in range(min(5, len(images))):  # Show up to 5 images
             image = images[img_idx]
             image_rois = rois[img_idx]
-            ground_truth_labels = labels[img_idx]
-            predicted_labels = predictions[img_idx]
+            ground_truth_labels_strings = labels[img_idx] # Keep original string labels
+            predicted_labels_numerical = predictions[img_idx]
 
             # Plot the image with ROIs and labels
             plt.figure(figsize=(10, 10))
             plt.imshow(image, cmap="gray")
             plt.title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
-            for roi_idx, (roi, gt_label, pred_label) in enumerate(zip(image_rois, ground_truth_labels, predicted_labels)):
+            for roi_idx, (roi, gt_label_string, pred_label_numerical) in enumerate(zip(image_rois, ground_truth_labels_strings, predicted_labels_numerical)):
                 x, y, w, h = map(int, roi)
-                gt_label_name = self.mlb.classes_[gt_label]  # Get the actual label name
-                pred_label_name = self.mlb.classes_[pred_label] # Get the predicted label name
-                color = "green" if gt_label == pred_label else "red"
+                gt_label_numerical = 1 if gt_label_string == 'depth-deep' else 0 # Convert string to numerical for indexing
+                gt_label_name = self.mlb.classes_[gt_label_numerical]  # Get the actual label name
+                pred_label_name = self.mlb.classes_[pred_label_numerical] # Get the predicted label name
+                color = "green" if gt_label_numerical == pred_label_numerical else "red"
                 plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=2))
                 plt.text(
                     x, y - 5,
@@ -388,13 +389,11 @@ class GLCMModel:
 
     def save_model(self, filepath):
         """
-        Save the trained model and MultiLabelBinarizer to a pickle file.
+        Save the trained model and MultiLabelBinarizer to a file.
         """
-        save_data = {
-            "model": self.model,
-            "mlb": self.mlb
-        }
-        joblib.dump(save_data, filepath)
+        if self.model is None:
+            raise ValueError("Model is not trained yet. Train the model before saving.")
+        joblib.dump({"model": self.model, "mlb": self.mlb}, filepath)
         print(f"Model and MultiLabelBinarizer saved to {filepath}")
 
     def load_model(self, filepath):
