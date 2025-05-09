@@ -144,76 +144,34 @@ class GLCMModel:
         train_features = []
         for idx in tqdm(range(len(train_data["images"])), desc="Training GLCM Extraction"):
             features, _ = self.extract_glcm_features([train_data["images"][idx]], [train_data.get("rois", [])[idx]])
-            train_features.extend(features)  # Flatten the list of feature arrays
-        train_features = np.array(train_features)  # Convert to a NumPy array
+            train_features.extend(features)
+        train_features = np.array(train_features)
 
         print("Extracting GLCM features for validation data...")
         val_features = []
         for idx in tqdm(range(len(val_data["images"])), desc="Validation GLCM Extraction"):
             features, _ = self.extract_glcm_features([val_data["images"][idx]], [val_data.get("rois", [])[idx]])
-            val_features.extend(features)  # Flatten the list of feature arrays
-        val_features = np.array(val_features)  # Convert to a NumPy array
+            val_features.extend(features)
+        val_features = np.array(val_features)
 
         # Preprocess labels
         train_labels = self.preprocess_labels(train_data["labels"])
         val_labels = self.preprocess_labels(val_data["labels"])
 
-        epochs = self.config.epochs
-        best_accuracy = 0
-        patience = max(5, int(len(train_data["images"]) / 100))
-        patience_counter = 0
-
         print("Starting training...")
-        with tqdm(total=epochs, desc="Training Progress", unit="epoch") as pbar:
-            for epoch in range(epochs):
-                self.model.fit(
-                    train_features,
-                    train_labels,
-                    eval_set=[(val_features, val_labels)],
-                    eval_metric="logloss",
-                    early_stopping_rounds=self.config.early_stopping_rounds,
-                    verbose=True,
-                )
-
-                val_predictions = self.model.predict(val_features)
-                accuracy = accuracy_score(val_labels, val_predictions)
-                print(f"Epoch {epoch + 1}/{epochs} - Validation Accuracy: {accuracy:.2f}")
-
-                pbar.set_postfix({"Validation Accuracy": f"{accuracy:.2f}"})
-                pbar.update(1)
-
-                if accuracy > best_accuracy:
-                    best_accuracy = accuracy
-                    patience_counter = 0
-                    joblib.dump(self.model, "best_model.pkl")
-                else:
-                    patience_counter += 1
-
-                if patience_counter >= patience:
-                    print("Early stopping triggered.")
-                    break
-                    
-    def predict(self, input_data, rois=None):
-        """
-        Make predictions using the trained model.
-        The model will infer depth labels for each ROI based on GLCM features.
-        """
-        if self.model is None:
-            raise ValueError("Model is not trained yet. Train the model before making predictions.")
-
-        if rois is None:
-            raise ValueError("ROIs must be provided for prediction.")
-
-        # Extract GLCM features for the provided ROIs
-        input_features = self.extract_glcm_features(input_data, rois)
-
-        # Predict depth labels for each ROI
-        predictions = self.model.predict(input_features)
-        return predictions
+        self.model.fit(
+            train_features,
+            train_labels,
+            eval_set=[(val_features, val_labels)],  # Validation data for early stopping
+            eval_metric="logloss",                 # Evaluation metric
+            early_stopping_rounds=self.config.early_stopping_rounds,  # Early stopping
+            verbose=True                           # Display training progress
+        )
+        print("Training completed.")
 
     def evaluate(self, test_data):
         """
-        Evaluate the model's performance on test data and display example predictions with visualizations.
+        Evaluate the model's performance on test data and display example predictions with visual comparisons.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before evaluation.")
@@ -270,6 +228,40 @@ class GLCMModel:
         disp.plot(cmap="Blues", xticks_rotation="vertical")
         plt.title("Confusion Matrix")
         plt.show()
+
+        # Visualize predictions vs ground truth
+        print("Visualizing predictions vs ground truth...")
+        for img_idx in range(min(5, len(test_data["images"]))):  # Show up to 5 images
+            image = test_data["images"][img_idx]
+            rois = test_data["rois"][img_idx]
+            ground_truth_labels = test_data["labels"][img_idx]
+            predicted_labels = []
+
+            # Collect predictions for the current image
+            for roi_idx, roi in enumerate(rois):
+                if (img_idx, roi_idx) in valid_roi_indices:
+                    pred_idx = valid_roi_indices.index((img_idx, roi_idx))
+                    predicted_labels.append(predictions[pred_idx])
+                else:
+                    predicted_labels.append("N/A")  # No prediction for invalid ROI
+
+            # Plot the image with ROIs and labels
+            plt.figure(figsize=(10, 10))
+            plt.imshow(image, cmap="gray")
+            plt.title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
+            for roi, gt_label, pred_label in zip(rois, ground_truth_labels, predicted_labels):
+                x, y, w, h = roi
+                color = "green" if gt_label == pred_label else "red"
+                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=2))
+                plt.text(
+                    x, y - 5,
+                    f"GT: {gt_label}\nPred: {pred_label}",
+                    color=color,
+                    fontsize=8,
+                    bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
+                )
+            plt.axis("off")
+            plt.show()
 
         return accuracy, report
 
