@@ -94,20 +94,25 @@ class GLCMModel:
 
 
 
-    def preprocess_labels(self, labels, flatten=True):
+    def preprocess_labels(self, labels):
         """
-        Preprocess labels using MultiLabelBinarizer for multi-label data.
+        Preprocess labels for binary classification (depth-deep vs depth-shallow).
+        
+        Args:
+            labels: List of depth labels ('depth-deep' or 'depth-shallow')
+        
+        Returns:
+            np.ndarray: Binary labels (0 for shallow, 1 for deep)
         """
         if self.mlb is None:
             self.mlb = MultiLabelBinarizer()
-            labels = self.mlb.fit_transform(labels)
+            # Convert string labels to binary (0 for shallow, 1 for deep)
+            binary_labels = np.array([1 if label == 'depth-deep' else 0 for label in labels])
+            self.mlb.fit([['depth-shallow'], ['depth-deep']])
         else:
-            labels = self.mlb.transform(labels)
-
-        if flatten and len(labels.shape) > 1 and labels.shape[1] > 1:
-            labels = np.argmax(labels, axis=1)
-
-        return labels
+            binary_labels = np.array([1 if label == 'depth-deep' else 0 for label in labels])
+        
+        return binary_labels
 
 
 
