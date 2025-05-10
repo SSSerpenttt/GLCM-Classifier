@@ -332,7 +332,8 @@ class GLCMModel:
         test_labels_numerical = self.preprocess_labels(original_gt_labels)
 
         # Flatten predictions for evaluation
-        flat_predictions = [pred for preds in predictions for pred in preds]
+        flat_predictions = [pred for preds in predictions for pred in preds]  # For metrics
+        reshaped_predictions = predictions  # Already per-image from predict()
 
         # Calculate accuracy
         accuracy = accuracy_score(test_labels_numerical, flat_predictions)
@@ -359,7 +360,7 @@ class GLCMModel:
           image = images[img_idx]
           image_rois = rois[img_idx]
           ground_truth_labels_strings = labels[img_idx]
-          predicted_labels_numerical = predictions[img_idx]
+          predicted_labels_numerical = reshaped_predictions[img_idx]
 
           print(f"ROIs for image {img_idx}: {image_rois}")
           print(f"GT labels: {ground_truth_labels_strings}")
