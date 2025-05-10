@@ -107,11 +107,11 @@ class GLCMModel:
         """
         if self.mlb is None:
             self.mlb = MultiLabelBinarizer()
-            # Convert string labels to binary (0 for shallow, 1 for deep)
-            binary_labels = np.array([1 if label == 'depth-deep' else 0 for label in labels])
-            self.mlb.fit([['depth-shallow'], ['depth-deep']])
+            # Convert string labels to binary (1 for shallow, 0 for deep)
+            binary_labels = np.array([1 if label == 'depth-shallow' else 0 for label in labels])
+            self.mlb.fit([['depth-deep'], ['depth-shallow']])
         else:
-            binary_labels = np.array([1 if label == 'depth-deep' else 0 for label in labels])
+            binary_labels = np.array([1 if label == 'depth-shallow' else 0 for label in labels])
         
         return binary_labels
 
@@ -247,6 +247,7 @@ class GLCMModel:
         print(f"Shape of val_labels: {val_labels.shape}")
 
         print("Starting training...")
+        
         self.model.fit(
             train_features,
             train_labels,
@@ -353,36 +354,45 @@ class GLCMModel:
         print(f"Mean Average Precision (mAP): {average_precision:.2f}")
         
         for img_idx in random.sample(range(len(images)), 5):
-          print(f"Visualizing predictions vs ground truth for image {img_idx + 1}...")
-          image = images[img_idx]
-          image_rois = rois[img_idx]
-          ground_truth_labels_strings = labels[img_idx]
-          predicted_labels_numerical = reshaped_predictions[img_idx]
+            print(f"Visualizing predictions vs ground truth for image {img_idx + 1}...")
+            image = images[img_idx]
+            image_rois = rois[img_idx]
+            ground_truth_labels_strings = labels[img_idx]
+            predicted_labels_numerical = reshaped_predictions[img_idx]
 
-          print(f"ROIs for image {img_idx}: {image_rois}")
-          print(f"GT labels: {ground_truth_labels_strings}")
-          print(f"Predictions: {predicted_labels_numerical}")
+            print(f"ROIs for image {img_idx}: {image_rois}")
+            print(f"GT labels: {ground_truth_labels_strings}")
+            print(f"Predictions: {predicted_labels_numerical}")
 
-          # Plot the image with ROIs and labels
-          plt.figure(figsize=(10, 10))
-          plt.imshow(image, cmap="gray")
-          plt.title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
-          for roi_idx, (roi, gt_label_string, pred_label_numerical) in enumerate(zip(image_rois, ground_truth_labels_strings, predicted_labels_numerical)):
-              x, y, w, h = map(int, roi)
-              gt_label_numerical = 1 if gt_label_string == 'depth-deep' else 0
-              gt_label_name = self.mlb.classes_[gt_label_numerical]
-              pred_label_name = self.mlb.classes_[pred_label_numerical]
-              color = "green" if gt_label_numerical == pred_label_numerical else "red"
-              plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=2))
-              plt.text(
-                  x, y - 5,
-                  f"GT: {gt_label_name}\nPred: {pred_label_name}",
-                  color=color,
-                  fontsize=8,
-                  bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
+            # Create a figure with 2 subplots: original + annotated
+            fig, axs = plt.subplots(1, 2, figsize=(16, 8))
+
+            axs[0].imshow(image)
+            axs[0].set_title("Original Image")
+            axs[0].axis("off")
+
+            # Plot the image with ROIs and labels
+            axs[1].imshow(image, cmap="gray")
+            axs[1].set_title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
+
+            for roi_idx, (roi, gt_label_string, pred_label_numerical) in enumerate(zip(image_rois, ground_truth_labels_strings, predicted_labels_numerical)):
+                x, y, w, h = map(int, roi)
+                gt_label_numerical = 1 if gt_label_string == 'depth-shallow' else 0
+                gt_label_name = self.mlb.classes_[gt_label_numerical]
+                pred_label_name = self.mlb.classes_[pred_label_numerical]
+                color = "green" if gt_label_numerical == pred_label_numerical else "red"
+                axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=1))
+                axs[1].text(
+                    x, y - 5,
+                    f"GT: {gt_label_name}\nPred: {pred_label_name}",
+                    color=color,
+                    fontsize=8,
+                    bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
               )
-          plt.axis("off")
-          plt.show()
+            axs[1].axis("off")
+
+            plt.tight_layout()
+            plt.show()
 
         # Return accuracy, report, and predictions
         return accuracy, report, predictions
