@@ -260,6 +260,7 @@ class GLCMModel:
             ]
         )
         print("Training completed.")
+        print("Number of trees in the trained model:", self.model.booster_.num_trees())
 
 
 
@@ -402,35 +403,30 @@ class GLCMModel:
 
     def save_model(self, model_path, mlb_path):
         """
-        Save the LightGBM model to a .txt file and MultiLabelBinarizer to a .json file.
+        Save the full LightGBM classifier (not just booster) and MultiLabelBinarizer.
         """
-        self.model.booster_.save_model(model_path)
-        print(f"Model saved to {model_path}")
+        joblib.dump(self.model, model_path)
+        print(f"✅ Full model saved to {model_path}")
 
-        # Save MultiLabelBinarizer classes
         mlb_data = {
             "classes": self.mlb.classes_.tolist()
         }
         with open(mlb_path, 'w') as f:
             json.dump(mlb_data, f)
-        print(f"MultiLabelBinarizer saved to {mlb_path}")
+        print(f"✅ MultiLabelBinarizer saved to {mlb_path}")
+
 
     
     
     def load_model(self, model_path, mlb_path):
         """
-        Load the LightGBM model from a .txt file and MultiLabelBinarizer from a .json file.
+        Load the full LightGBM classifier and MultiLabelBinarizer.
         """
-        # Load model
-        booster = lgb.Booster(model_file=model_path)
-        self.model = LGBMClassifier()
-        self.model._Booster = booster
-        self.model.fitted_ = True  # trick to mark it as "fitted"
-        print(f"Model loaded from {model_path}")
+        self.model = joblib.load(model_path)
+        print(f"✅ Model loaded from {model_path}")
 
-        # Load MultiLabelBinarizer classes
         with open(mlb_path, 'r') as f:
             mlb_data = json.load(f)
         self.mlb = MultiLabelBinarizer(classes=mlb_data["classes"])
-        self.mlb.fit([])  # dummy fit to initialize internals
-        print(f"MultiLabelBinarizer loaded from {mlb_path}")
+        self.mlb.fit([])  # dummy fit to restore internal state
+        print(f"✅ MultiLabelBinarizer loaded from {mlb_path}")
