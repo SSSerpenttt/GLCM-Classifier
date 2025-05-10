@@ -1,5 +1,5 @@
 import numpy as np
-# from sklearn.ensemble import GradientBoostingClassifier
+import lightgbm as lgb
 from lightgbm import LGBMClassifier, early_stopping, log_evaluation
 from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import MultiLabelBinarizer
@@ -10,6 +10,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt  # Add this import at the top of the file
 from joblib import Parallel, delayed
 import random
+import json
 
 class GLCMModel:
     def __init__(self, config):
@@ -398,22 +399,38 @@ class GLCMModel:
         return accuracy, report, predictions
 
 
-    def save_model(self, filepath):
-        """
-        Save the trained model and MultiLabelBinarizer only (no config).
-        """
-        save_data = {
-            "model": self.model,
-            "mlb": self.mlb
-        }
-        joblib.dump(save_data, filepath)
-        print(f"Model and MultiLabelBinarizer saved to {filepath}")
 
-    def load_model(self, filepath):
+    def save_model(self, model_path, mlb_path):
         """
-        Load a trained model and MultiLabelBinarizer from a file.
+        Save the LightGBM model to a .txt file and MultiLabelBinarizer to a .json file.
         """
-        data = joblib.load(filepath)
-        self.data = data["model"]
-        self.mlb = data["mlb"]
-        print(f"Model and MultiLabelBinarizer loaded from {filepath}")
+        self.model.booster_.save_model(model_path)
+        print(f"Model saved to {model_path}")
+
+        # Save MultiLabelBinarizer classes
+        mlb_data = {
+            "classes": self.mlb.classes_.tolist()
+        }
+        with open(mlb_path, 'w') as f:
+            json.dump(mlb_data, f)
+        print(f"MultiLabelBinarizer saved to {mlb_path}")
+
+    
+    
+    def load_model(self, model_path, mlb_path):
+        """
+        Load the LightGBM model from a .txt file and MultiLabelBinarizer from a .json file.
+        """
+        # Load model
+        booster = lgb.Booster(model_file=model_path)
+        self.model = LGBMClassifier()
+        self.model._Booster = booster
+        self.model.fitted_ = True  # trick to mark it as "fitted"
+        print(f"Model loaded from {model_path}")
+
+        # Load MultiLabelBinarizer classes
+        with open(mlb_path, 'r') as f:
+            mlb_data = json.load(f)
+        self.mlb = MultiLabelBinarizer(classes=mlb_data["classes"])
+        self.mlb.fit([])  # dummy fit to initialize internals
+        print(f"MultiLabelBinarizer loaded from {mlb_path}")
