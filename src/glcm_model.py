@@ -353,12 +353,15 @@ class GLCMModel:
         # Calculate mAP
         average_precision = average_precision_score(test_labels_numerical, flat_predictions)
         print(f"Mean Average Precision (mAP): {average_precision:.2f}")
-
         
-        # Visualize predictions vs ground truth
+        image_iter = []
         for i in range(5):
-            print("Visualizing predictions vs ground truth for the first image...")
-            img_idx = random.randint(0, len(images)-1)  # Display random images
+            image_iter.append(random.randint(0, len(images)-1))
+
+        # Visualize predictions vs ground truth
+        for i in image_iter:
+            print(f"Visualizing predictions vs ground truth for image {i + 1}...")
+            img_idx = i
             image = images[img_idx]
             image_rois = rois[img_idx]
             ground_truth_labels_strings = labels[img_idx]
