@@ -9,6 +9,7 @@ import joblib
 from tqdm import tqdm
 import matplotlib.pyplot as plt  # Add this import at the top of the file
 from joblib import Parallel, delayed
+import random
 
 class GLCMModel:
     def __init__(self, config):
@@ -353,34 +354,36 @@ class GLCMModel:
         average_precision = average_precision_score(test_labels_numerical, flat_predictions)
         print(f"Mean Average Precision (mAP): {average_precision:.2f}")
 
-        # Visualize predictions vs ground truth (only one image)
-        print("Visualizing predictions vs ground truth for the first image...")
-        img_idx = 0  # Display only the first image
-        image = images[img_idx]
-        image_rois = rois[img_idx]
-        ground_truth_labels_strings = labels[img_idx]
-        predicted_labels_numerical = predictions[img_idx]
+        
+        # Visualize predictions vs ground truth
+        for i in range(5):
+            print("Visualizing predictions vs ground truth for the first image...")
+            img_idx = random.randint(0, len(images)-1)  # Display random images
+            image = images[img_idx]
+            image_rois = rois[img_idx]
+            ground_truth_labels_strings = labels[img_idx]
+            predicted_labels_numerical = predictions[img_idx]
 
-        # Plot the image with ROIs and labels
-        plt.figure(figsize=(10, 10))
-        plt.imshow(image, cmap="gray")
-        plt.title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
-        for roi_idx, (roi, gt_label_string, pred_label_numerical) in enumerate(zip(image_rois, ground_truth_labels_strings, predicted_labels_numerical)):
-            x, y, w, h = map(int, roi)
-            gt_label_numerical = 1 if gt_label_string == 'depth-deep' else 0
-            gt_label_name = self.mlb.classes_[gt_label_numerical]
-            pred_label_name = self.mlb.classes_[pred_label_numerical]
-            color = "green" if gt_label_numerical == pred_label_numerical else "red"
-            plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=2))
-            plt.text(
-                x, y - 5,
-                f"GT: {gt_label_name}\nPred: {pred_label_name}",
-                color=color,
-                fontsize=8,
-                bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
-            )
-        plt.axis("off")
-        plt.show()
+            # Plot the image with ROIs and labels
+            plt.figure(figsize=(10, 10))
+            plt.imshow(image, cmap="gray")
+            plt.title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
+            for roi_idx, (roi, gt_label_string, pred_label_numerical) in enumerate(zip(image_rois, ground_truth_labels_strings, predicted_labels_numerical)):
+                x, y, w, h = map(int, roi)
+                gt_label_numerical = 1 if gt_label_string == 'depth-deep' else 0
+                gt_label_name = self.mlb.classes_[gt_label_numerical]
+                pred_label_name = self.mlb.classes_[pred_label_numerical]
+                color = "green" if gt_label_numerical == pred_label_numerical else "red"
+                plt.gca().add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=2))
+                plt.text(
+                    x, y - 5,
+                    f"GT: {gt_label_name}\nPred: {pred_label_name}",
+                    color=color,
+                    fontsize=8,
+                    bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
+                )
+            plt.axis("off")
+            plt.show()
 
         # Return accuracy, report, and predictions
         return accuracy, report, predictions
