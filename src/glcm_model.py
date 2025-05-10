@@ -280,9 +280,9 @@ class GLCMModel:
         input_features = []
         valid_roi_indices = []  # Track valid ROI indices
         for idx in tqdm(range(len(images)), desc="Prediction Progress"):
-            features, valid_indices = self.extract_glcm_features([images[idx]], [rois[idx]])
+            features, local_indices = self.extract_glcm_features([images[idx]], [rois[idx]])
             input_features.extend(features)
-            valid_roi_indices.extend(valid_indices)
+            valid_roi_indices.extend([(idx, roi_idx) for (_, roi_idx) in local_indices])
 
         input_features = np.array(input_features)
 
@@ -299,9 +299,10 @@ class GLCMModel:
 
         # Return predictions mapped to images and ROIs
         return {
-            "predictions": mapped_predictions,  # List of lists of predictions for each image
-            "rois": rois,                       # Original ROIs from input data
-            "images": images                    # Original images from input data
+            "predictions": mapped_predictions,
+            "rois": rois,
+            "images": images,
+            "valid_roi_indices": valid_roi_indices
         }    
 
 
@@ -322,15 +323,9 @@ class GLCMModel:
         predictions = predictions_data["predictions"]
 
         # Align ground truth labels with valid ROIs and preprocess them
-        valid_roi_indices = []
-        original_gt_labels = []
-        for idx, roi_list in enumerate(rois):
-            for roi_idx in range(len(roi_list)):
-                valid_roi_indices.append((idx, roi_idx))
-                original_gt_labels.append(labels[idx][roi_idx])
-
-        test_labels_numerical = self.preprocess_labels(original_gt_labels)
-
+        valid_roi_indices = predictions_data["valid_roi_indices"]
+        original_gt_labels = [labels[img_idx][roi_idx] for img_idx, roi_idx in valid_roi_indices]
+        
         # Flatten predictions for evaluation
         flat_predictions = [pred for preds in predictions for pred in preds]  # For metrics
         reshaped_predictions = predictions  # Already per-image from predict()
