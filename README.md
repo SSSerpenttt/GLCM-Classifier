@@ -1,6 +1,17 @@
-# GLCM Classification Model
+# GLCM Depth Classifier 🏆
 
-This project implements a GLCM (Gray Level Co-occurrence Matrix) classification model suitable for image classification tasks. The model is designed to be easily configurable and trainable, with a focus on usability in both local environments and Google Colab.
+A machine learning model for depth classification using **Gray-Level Co-occurrence Matrix (GLCM)** texture features and **LightGBM**.
+
+---
+
+## 📌 Features
+- Extracts **GLCM texture features** from grayscale images.
+- Trains a **GradientBoostingClassifier (LightGBM)** for depth classification.
+- Supports **multi-label binarization (MLB)** for structured label encoding.
+- Includes **model evaluation & visualization tools**.
+- Saves and loads the model efficiently with **joblib**.
+
+---
 
 ## Project Structure
 
@@ -20,26 +31,19 @@ glcm-classification-model
 └── README.md                # Project documentation
 ```
 
-## Installation
+## 🔧 Installation
+Clone the repository and install dependencies:
+```bash
+git clone https://github.com/SSSerpenttt/GLCM-Classifier.git
+cd GLCM-Classifier
+pip install -r requirements.txt
+```
 
-To set up the environment, follow these steps:
-
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd glcm-classification-model
-   ```
-
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Verify the installation by running:
-   ```bash
-   python --version
-   pip list
-   ```
+Verify the installation:
+```
+python --version
+pip list
+```
 
 ## Usage
 
@@ -100,6 +104,7 @@ The script uses a `Config` class to manage various settings for data loading, GL
     * Description:  The level of detail in logging messages (e.g., "INFO", "DEBUG", "WARNING").
     * Default: `"INFO"`
 
+
 ###   Modifying the Configuration
 
 To customize the behavior of the scripts, modify the values within the `Config` class in `src/config.py`.  For example:
@@ -115,8 +120,16 @@ config.angles = [0, np.pi/2]
 
 ### 2. Training
 Run the training script to train the model:
-```bash
-python src/train.py
+```python
+from glcm_model import GLCMModel
+config = Config()
+model = GLCMModel(config)
+
+# Load dataset
+train_data, val_data = load_data(config.data_path)["train_data"], load_data(config.data_path)["val_data"]
+
+# Train model
+model.train(train_data, val_data)
 ```
 
 ### 3. Google Colab
@@ -125,11 +138,51 @@ For a step-by-step guide to training the model in Google Colab:
 2. Follow the instructions in the notebook to configure, train, and evaluate the model.
 
 ### 4. Model Saving and Evaluation
-After training, the model is saved as a `.pkl` file. You can evaluate the model's performance using the test dataset:
-```bash
-python src/train.py
+After training, you can save the trained model as `trained-glcm_model.txt` file and the MLB data as `mlb.json`. Both files are needed to be able to run the trained model. You can evaluate the model's performance on the test dataset.
+
+#### 📂 Model Saving & Loading
+- For saving the trained model:
+```python
+model.save_model("trained-glcm_model.txt", "mlb.json")
 ```
-The script will output metrics such as accuracy and a classification report.
+- For loading the saved model:
+```python
+model.load_model("trained-glcm_model.txt", "mlb.json")
+```
+
+#### ✅ Checking Model Integrity
+Ensure the model and MLB files are not corrupted before loading:
+```python
+from google.colab import files
+import joblib
+import json
+import os
+import lightgbm as lgb
+
+def check_model_files(model_path, mlb_path):
+    """Check if the trained model and MLB file are valid before loading."""
+    
+    if not os.path.exists(model_path) or not os.path.exists(mlb_path):
+        print(f"❌ Missing files!")
+        return False
+
+    try:
+        model = joblib.load(model_path)
+        print(f"✅ Model loaded. Trees: {model.booster_.num_trees()}")
+    except Exception as e:
+        print(f"❌ Model error: {e}")
+        return False
+
+    try:
+        with open(mlb_path, 'r') as f:
+            mlb_data = json.load(f)
+        print(f"✅ MLB file loaded. Classes: {len(mlb_data['classes'])}")
+    except Exception as e:
+        print(f"❌ MLB error: {e}")
+        return False
+
+    return True
+```
 
 ## Dataset Structure
 
@@ -155,6 +208,25 @@ data_path/
 Follow run the evaluate cell provided in the notebook. This will only work if:
 1. Your newly instantiated model just finished training.
 2. You created a new model instance and loaded your pre-trained weights.
+
+### 🎯 Evaluating Pre-Trained Model
+
+If using a pre-trained model:
+```python
+# Upload the trained model
+from google.colab import files
+uploaded_model = files.upload()
+model_path = next(iter(uploaded_model))
+
+uploaded_mlb = files.upload()
+mlb_path = next(iter(uploaded_mlb))
+
+# Load model
+model.load_model(model_path, mlb_path)
+
+# Run inference
+accuracy, report, predictions = model.evaluate(test_data["images"], test_data["rois"], test_data["labels"])
+```
 
 ## Contributing
 
