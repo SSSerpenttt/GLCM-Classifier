@@ -325,7 +325,9 @@ class GLCMModel:
         # Align ground truth labels with valid ROIs and preprocess them
         valid_roi_indices = predictions_data["valid_roi_indices"]
         original_gt_labels = [labels[img_idx][roi_idx] for img_idx, roi_idx in valid_roi_indices]
-        
+
+        test_labels_numerical = self.preprocess_labels(original_gt_labels)
+
         # Flatten predictions for evaluation
         flat_predictions = [pred for preds in predictions for pred in preds]  # For metrics
         reshaped_predictions = predictions  # Already per-image from predict()
