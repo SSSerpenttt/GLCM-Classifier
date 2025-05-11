@@ -354,23 +354,54 @@ class GLCMModel:
             axs[1].imshow(image, cmap="gray")
             axs[1].set_title(f"Predictions for Image {img_idx + 1}")
 
+            # Sample up to 5 images for visualization
             sampled_image_indices = random.sample(range(len(images)), min(5, len(images)))
 
-            for roi, pred_label in sampled_image_indices:
-                x, y, w, h = map(int, roi)
-                label_name = self.mlb.classes_[pred_label] if self.mlb else str(pred_label)
-                axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor="blue", facecolor="none", linewidth=1.5))
-                axs[1].text(
-                    x, y - 5,
-                    f"Pred: {label_name}",
-                    color="blue",
-                    fontsize=8,
-                    bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
-                )
+            for img_idx in sampled_image_indices:
+                print(f"\n📷 Predictions for Image {img_idx + 1}:")
+                image = images[img_idx]
+                image_rois = rois[img_idx]
+                predicted_labels = mapped_predictions[img_idx]
 
-            axs[1].axis("off")
-            plt.tight_layout()
-            plt.show()
+                if not predicted_labels:
+                    print("⚠️ No valid ROIs were processed for this image.")
+                    continue
+
+                print(f"ROIs: {image_rois}")
+                print(f"Predicted labels (numeric): {predicted_labels}")
+                if self.mlb:
+                    label_names = [self.mlb.classes_[p] for p in predicted_labels]
+                    print(f"Predicted labels (named): {label_names}")
+                else:
+                    label_names = [str(p) for p in predicted_labels]
+                    print("🔍 Note: MultiLabelBinarizer not initialized yet, showing numeric labels only.")
+
+                # Visualization
+                fig, axs = plt.subplots(1, 2, figsize=(16, 8))
+                axs[0].imshow(image, cmap="gray")
+                axs[0].set_title("Original Image")
+                axs[0].axis("off")
+
+                axs[1].imshow(image, cmap="gray")
+                axs[1].set_title(f"Predictions for Image {img_idx + 1}")
+
+                # Draw up to 5 ROI predictions
+                sampled_rois = random.sample(list(zip(image_rois, predicted_labels)), min(5, len(predicted_labels)))
+                for roi, pred_label in sampled_rois:
+                    x, y, w, h = map(int, roi)
+                    label_name = self.mlb.classes_[pred_label] if self.mlb else str(pred_label)
+                    axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor="blue", facecolor="none", linewidth=1.5))
+                    axs[1].text(
+                        x, y - 5,
+                        f"Pred: {label_name}",
+                        color="blue",
+                        fontsize=8,
+                        bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
+                    )
+
+                axs[1].axis("off")
+                plt.tight_layout()
+                plt.show()
 
         # Return predictions mapped to images and ROIs
         return {
