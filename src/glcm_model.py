@@ -294,7 +294,6 @@ class GLCMModel:
                 train_features,
                 train_labels,
                 eval_set=[(val_features, val_labels)],
-                eval_metric="logloss",
                 early_stopping_rounds=self.config.early_stopping_rounds,
                 verbose=True
             )
@@ -313,7 +312,7 @@ class GLCMModel:
 
 
 
-def predict(self, images, rois):
+    def predict(self, images, rois):
         """
         Make predictions using the trained model.
         The model will infer depth labels for each ROI based on GLCM features.
