@@ -354,7 +354,9 @@ class GLCMModel:
             axs[1].imshow(image, cmap="gray")
             axs[1].set_title(f"Predictions for Image {img_idx + 1}")
 
-            for roi, pred_label in random.sample(list(zip(image_rois, predicted_labels)), min(5, len(predicted_labels))):
+            sampled_image_indices = random.sample(range(len(images)), min(5, len(images)))
+
+            for roi, pred_label in sampled_image_indices:
                 x, y, w, h = map(int, roi)
                 label_name = self.mlb.classes_[pred_label] if self.mlb else str(pred_label)
                 axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor="blue", facecolor="none", linewidth=1.5))
