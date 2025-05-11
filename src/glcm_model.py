@@ -15,12 +15,12 @@ from xgboost import XGBClassifier
 from sklearn.ensemble import RandomForestClassifier
 
 class GLCMModel:
-    def __init__(self, config, classifier_type="lightgbm"):
+    def __init__(self, config):
         """
         Initialize the GLCMModel with a configuration object.
         """
         self.config = config
-        self.classifier_type = classifier_type
+        self.classifier_type = config.classifier_type
         # Classifier selection
         if classifier_type == "lightgbm":
             self.model = LGBMClassifier(**config.model_params)
@@ -44,42 +44,59 @@ class GLCMModel:
         def process_roi(image, roi, img_idx, roi_idx):
             x, y, w, h = map(int, roi)
 
-            # Clip ROI coordinates to fit within the image dimensions
+            # Clip ROI to valid bounds
             x = max(0, min(x, image.shape[1] - 1))
             y = max(0, min(y, image.shape[0] - 1))
-            w = max(1, min(w, image.shape[1] - x))  # Ensure width is at least 1
-            h = max(1, min(h, image.shape[0] - y))  # Ensure height is at least 1
+            w = max(1, min(w, image.shape[1] - x))
+            h = max(1, min(h, image.shape[0] - y))
 
             cropped_image = image[y:y+h, x:x+w]
-
-            # Skip invalid ROIs
             if cropped_image.size == 0:
                 return None, None
 
-            # Dynamically calculate GLCM parameters based on ROI size
-            min_dim = min(w, h)
-            distances = [1, max(1, min_dim // 4)]
-            angles = self.config.angles  # Access angles directly
-            levels = self.config.levels  # Access levels directly
+            patch_size = 16  # Size of sampled patches
+            num_random_patches = 5
 
-            # Extract GLCM features
-            glcm = graycomatrix(
-                cropped_image,
-                distances=distances,
-                angles=angles,
-                levels=levels,
-                symmetric=True,
-                normed=True,
-            )
-            contrast = graycoprops(glcm, 'contrast').flatten()
-            dissimilarity = graycoprops(glcm, 'dissimilarity').flatten()
-            homogeneity = graycoprops(glcm, 'homogeneity').flatten()
-            energy = graycoprops(glcm, 'energy').flatten()
-            correlation = graycoprops(glcm, 'correlation').flatten()
-            asm = graycoprops(glcm, 'ASM').flatten()
+            def extract_features_from_patch(patch):
+                glcm = graycomatrix(
+                    patch,
+                    distances=[1, max(1, min(patch.shape) // 4)],
+                    angles=self.config.angles,
+                    levels=self.config.levels,
+                    symmetric=True,
+                    normed=True
+                )
+                features = [
+                    graycoprops(glcm, prop).flatten()
+                    for prop in ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM']
+                ]
+                return np.hstack(features)
 
-            roi_features = np.hstack([contrast, dissimilarity, homogeneity, energy, correlation, asm])
+            # 📌 Sample random patches within the ROI
+            random_features = []
+            for _ in range(num_random_patches):
+                rand_x = random.randint(0, max(0, w - patch_size))
+                rand_y = random.randint(0, max(0, h - patch_size))
+                patch = cropped_image[rand_y:rand_y+patch_size, rand_x:rand_x+patch_size]
+                if patch.shape == (patch_size, patch_size):
+                    random_features.append(extract_features_from_patch(patch))
+
+            # 🧿 Extract center patch
+            center_x = max(0, (w - patch_size) // 2)
+            center_y = max(0, (h - patch_size) // 2)
+            center_patch = cropped_image[center_y:center_y+patch_size, center_x:center_x+patch_size]
+            center_features = extract_features_from_patch(center_patch) if center_patch.shape == (patch_size, patch_size) else np.zeros(6 * len(self.config.angles))
+
+            # Aggregate random features (mean)
+            if random_features:
+                random_features_mean = np.mean(random_features, axis=0)
+            else:
+                random_features_mean = np.zeros_like(center_features)
+
+            # Concatenate center and random features
+            roi_features = np.hstack([center_features, random_features_mean])
             return roi_features, (img_idx, roi_idx)
+
 
         # Flatten the input for parallel processing
         tasks = []
@@ -259,7 +276,9 @@ class GLCMModel:
 
         print("Starting training...")
         
-        if self.classifier_type == "lightgbm":
+        classifier = self.classifier_type.lower()
+
+        if classifier == "lightgbm":
             self.model.fit(
                 train_features,
                 train_labels,
@@ -270,7 +289,7 @@ class GLCMModel:
                     log_evaluation(period=1)
                 ]
             )
-        elif self.classifier_type == "xgboost":
+        elif classifier == "xgboost":
             self.model.fit(
                 train_features,
                 train_labels,
@@ -279,12 +298,18 @@ class GLCMModel:
                 early_stopping_rounds=self.config.early_stopping_rounds,
                 verbose=True
             )
-        elif self.classifier_type == "RandomForest": 
+        elif classifier == "randomforest":
             self.model.fit(train_features, train_labels)
+        else:
+            raise ValueError(f"Unsupported classifier: {self.classifier_type}")
 
-        print("Training completed.")
+        print("✅ Training completed.")
+
+        # Log number of trees if available
         if hasattr(self.model, "booster_"):
-            print("Number of trees in the trained model:", self.model.booster_.num_trees())
+            print("🌲 Number of trees in trained model:", self.model.booster_.num_trees())
+        elif hasattr(self.model, "estimators_"):
+            print("🌲 Number of trees in trained model:", len(self.model.estimators_))
 
 
 
@@ -321,8 +346,11 @@ class GLCMModel:
 
         # Map predictions back to their corresponding images and ROIs
         mapped_predictions = [[] for _ in range(len(images))]
-        for (img_idx, roi_idx), prediction in zip(valid_roi_indices, predictions):
+        mapped_confidences = [[] for _ in range(len(images))]
+
+        for (img_idx, roi_idx), prediction, confidence in zip(valid_roi_indices, predictions, confidences):
             mapped_predictions[img_idx].append(prediction)
+            mapped_confidences[img_idx].append(confidence)
 
         # ✅ Visualize up to 5 randomly chosen images
         sampled_image_indices = random.sample(range(len(images)), min(5, len(images)))
@@ -362,7 +390,7 @@ class GLCMModel:
                 axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor="blue", facecolor="none", linewidth=1.5))
                 axs[1].text(
                     x, y - 5,
-                    f"Pred: {label_name}",
+                    f"Pred: {label_name} ({confidence:.2f})",
                     color="blue",
                     fontsize=8,
                     bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
@@ -375,6 +403,7 @@ class GLCMModel:
         # Return predictions mapped to images and ROIs
         return {
             "predictions": mapped_predictions,
+            "confidences": mapped_confidences,
             "rois": rois,
             "images": images,
             "valid_roi_indices": valid_roi_indices
@@ -389,14 +418,10 @@ class GLCMModel:
         Evaluate the model's performance on the specified images and ROIs.
         Displays example predictions with visual comparisons.
         Returns accuracy, classification report, and predictions.
-
-        Args:
-            images (list or np.array): List or array of grayscale images to evaluate.
-            rois (list): List of ROIs for each image.
-            labels (list): Ground truth labels for the ROIs.
         """
         predictions_data = self.predict(images, rois)
         predictions = predictions_data["predictions"]
+        confidences = predictions_data.get("confidences", None)
 
         # Align ground truth labels with valid ROIs and preprocess them
         valid_roi_indices = predictions_data["valid_roi_indices"]
@@ -406,7 +431,7 @@ class GLCMModel:
 
         # Flatten predictions for evaluation
         flat_predictions = [pred for preds in predictions for pred in preds]  # For metrics
-        reshaped_predictions = predictions  # Already per-image from predict()
+        reshaped_predictions = predictions
 
         # Calculate accuracy
         accuracy = accuracy_score(test_labels_numerical, flat_predictions)
@@ -427,13 +452,15 @@ class GLCMModel:
         # Calculate mAP
         average_precision = average_precision_score(test_labels_numerical, flat_predictions)
         print(f"Mean Average Precision (mAP): {average_precision:.2f}")
-        
-        for img_idx in random.sample(range(len(images)), 5):
+
+        # Show up to 5 random visualizations
+        for img_idx in random.sample(range(len(images)), min(5, len(images))):
             print(f"Visualizing predictions vs ground truth for image {img_idx + 1}...")
             image = images[img_idx]
             image_rois = rois[img_idx]
             ground_truth_labels_strings = labels[img_idx]
             predicted_labels_numerical = reshaped_predictions[img_idx]
+            predicted_confidences = confidences[img_idx] if confidences else [None] * len(predicted_labels_numerical)
 
             print(f"ROIs for image {img_idx}: {image_rois}")
             print(f"GT labels: {ground_truth_labels_strings}")
@@ -442,35 +469,37 @@ class GLCMModel:
             # Create a figure with 2 subplots: original + annotated
             fig, axs = plt.subplots(1, 2, figsize=(16, 8))
 
-            axs[0].imshow(image)
+            axs[0].imshow(image, cmap="gray")
             axs[0].set_title("Original Image")
             axs[0].axis("off")
 
-            # Plot the image with ROIs and labels
             axs[1].imshow(image, cmap="gray")
             axs[1].set_title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
 
-            for roi_idx, (roi, gt_label_string, pred_label_numerical) in enumerate(zip(image_rois, ground_truth_labels_strings, predicted_labels_numerical)):
+            for roi_idx, (roi, gt_label_string, pred_label_numerical, confidence) in enumerate(zip(
+                image_rois, ground_truth_labels_strings, predicted_labels_numerical, predicted_confidences
+            )):
                 x, y, w, h = map(int, roi)
                 gt_label_numerical = 1 if gt_label_string == 'depth-shallow' else 0
                 gt_label_name = self.mlb.classes_[gt_label_numerical]
                 pred_label_name = self.mlb.classes_[pred_label_numerical]
                 color = "green" if gt_label_numerical == pred_label_numerical else "red"
+                confidence_text = f"{confidence:.2f}" if confidence is not None else "N/A"
                 axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=1))
                 axs[1].text(
                     x, y - 5,
-                    f"GT: {gt_label_name}\nPred: {pred_label_name}",
+                    f"GT: {gt_label_name}\nPred: {pred_label_name} ({confidence_text})",
                     color=color,
                     fontsize=8,
                     bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
-              )
-            axs[1].axis("off")
+                )
 
+            axs[1].axis("off")
             plt.tight_layout()
             plt.show()
 
-        # Return accuracy, report, and predictions
         return accuracy, report, predictions
+
 
 
 
