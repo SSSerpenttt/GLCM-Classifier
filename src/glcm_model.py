@@ -22,12 +22,12 @@ class GLCMModel:
         self.config = config
         self.classifier_type = config.classifier_type
         # Classifier selection
-        if classifier_type == "lightgbm":
+        if self.classifier_type == "lightgbm":
             self.model = LGBMClassifier(**config.model_params)
-        elif classifier_type == "randomforest":
-            self.model = RandomForestClassifier(n_estimators=200)
-        elif classifier_type == "xgboost":
-            self.model = XGBClassifier(n_estimators=200, use_label_encoder=False, eval_metric="logloss")
+        elif self.classifier_type == "randomforest":
+            self.model = RandomForestClassifier(**config.model_params)
+        elif self.classifier_type == "xgboost":
+            self.model = XGBClassifier(**config.model_params)
         else:
             raise ValueError(f"Unsupported classifier type: {classifier_type}")
         
