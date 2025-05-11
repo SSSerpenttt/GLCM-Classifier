@@ -313,7 +313,7 @@ class GLCMModel:
 
 
 
-    def predict(self, images, rois):
+def predict(self, images, rois):
         """
         Make predictions using the trained model.
         The model will infer depth labels for each ROI based on GLCM features.
@@ -346,11 +346,8 @@ class GLCMModel:
 
         # Map predictions back to their corresponding images and ROIs
         mapped_predictions = [[] for _ in range(len(images))]
-        mapped_confidences = [[] for _ in range(len(images))]
-
-        for (img_idx, roi_idx), prediction, confidence in zip(valid_roi_indices, predictions, confidences):
+        for (img_idx, roi_idx), prediction in zip(valid_roi_indices, predictions):
             mapped_predictions[img_idx].append(prediction)
-            mapped_confidences[img_idx].append(confidence)
 
         # ✅ Visualize up to 5 randomly chosen images
         sampled_image_indices = random.sample(range(len(images)), min(5, len(images)))
@@ -390,7 +387,7 @@ class GLCMModel:
                 axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor="blue", facecolor="none", linewidth=1.5))
                 axs[1].text(
                     x, y - 5,
-                    f"Pred: {label_name} ({confidence:.2f})",
+                    f"Pred: {label_name}",
                     color="blue",
                     fontsize=8,
                     bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
@@ -403,12 +400,10 @@ class GLCMModel:
         # Return predictions mapped to images and ROIs
         return {
             "predictions": mapped_predictions,
-            "confidences": mapped_confidences,
             "rois": rois,
             "images": images,
             "valid_roi_indices": valid_roi_indices
         }
-
 
 
 
@@ -418,10 +413,14 @@ class GLCMModel:
         Evaluate the model's performance on the specified images and ROIs.
         Displays example predictions with visual comparisons.
         Returns accuracy, classification report, and predictions.
+
+        Args:
+            images (list or np.array): List or array of grayscale images to evaluate.
+            rois (list): List of ROIs for each image.
+            labels (list): Ground truth labels for the ROIs.
         """
         predictions_data = self.predict(images, rois)
         predictions = predictions_data["predictions"]
-        confidences = predictions_data.get("confidences", None)
 
         # Align ground truth labels with valid ROIs and preprocess them
         valid_roi_indices = predictions_data["valid_roi_indices"]
@@ -431,7 +430,7 @@ class GLCMModel:
 
         # Flatten predictions for evaluation
         flat_predictions = [pred for preds in predictions for pred in preds]  # For metrics
-        reshaped_predictions = predictions
+        reshaped_predictions = predictions  # Already per-image from predict()
 
         # Calculate accuracy
         accuracy = accuracy_score(test_labels_numerical, flat_predictions)
@@ -452,15 +451,13 @@ class GLCMModel:
         # Calculate mAP
         average_precision = average_precision_score(test_labels_numerical, flat_predictions)
         print(f"Mean Average Precision (mAP): {average_precision:.2f}")
-
-        # Show up to 5 random visualizations
-        for img_idx in random.sample(range(len(images)), min(5, len(images))):
+        
+        for img_idx in random.sample(range(len(images)), 5):
             print(f"Visualizing predictions vs ground truth for image {img_idx + 1}...")
             image = images[img_idx]
             image_rois = rois[img_idx]
             ground_truth_labels_strings = labels[img_idx]
             predicted_labels_numerical = reshaped_predictions[img_idx]
-            predicted_confidences = confidences[img_idx] if confidences else [None] * len(predicted_labels_numerical)
 
             print(f"ROIs for image {img_idx}: {image_rois}")
             print(f"GT labels: {ground_truth_labels_strings}")
@@ -469,35 +466,34 @@ class GLCMModel:
             # Create a figure with 2 subplots: original + annotated
             fig, axs = plt.subplots(1, 2, figsize=(16, 8))
 
-            axs[0].imshow(image, cmap="gray")
+            axs[0].imshow(image)
             axs[0].set_title("Original Image")
             axs[0].axis("off")
 
+            # Plot the image with ROIs and labels
             axs[1].imshow(image, cmap="gray")
             axs[1].set_title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
 
-            for roi_idx, (roi, gt_label_string, pred_label_numerical, confidence) in enumerate(zip(
-                image_rois, ground_truth_labels_strings, predicted_labels_numerical, predicted_confidences
-            )):
+            for roi_idx, (roi, gt_label_string, pred_label_numerical) in enumerate(zip(image_rois, ground_truth_labels_strings, predicted_labels_numerical)):
                 x, y, w, h = map(int, roi)
                 gt_label_numerical = 1 if gt_label_string == 'depth-shallow' else 0
                 gt_label_name = self.mlb.classes_[gt_label_numerical]
                 pred_label_name = self.mlb.classes_[pred_label_numerical]
                 color = "green" if gt_label_numerical == pred_label_numerical else "red"
-                confidence_text = f"{confidence:.2f}" if confidence is not None else "N/A"
                 axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor=color, facecolor="none", linewidth=1))
                 axs[1].text(
                     x, y - 5,
-                    f"GT: {gt_label_name}\nPred: {pred_label_name} ({confidence_text})",
+                    f"GT: {gt_label_name}\nPred: {pred_label_name}",
                     color=color,
                     fontsize=8,
                     bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
-                )
-
+              )
             axs[1].axis("off")
+
             plt.tight_layout()
             plt.show()
 
+        # Return accuracy, report, and predictions
         return accuracy, report, predictions
 
 
