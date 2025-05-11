@@ -29,12 +29,12 @@ class GLCMModel:
         elif self.classifier_type == "xgboost":
             self.model = XGBClassifier(**config.model_params)
         else:
-            raise ValueError(f"Unsupported classifier type: {classifier_type}")
+            raise ValueError(f"Unsupported classifier type: {self.classifier_type}")
         
         self.data = None
         self.mlb = None  # MultiLabelBinarizer instance
 
-        print(f"Using {classifier_type} as the classifier.")
+        print(f"Using {self.classifier_type} as the classifier.")
 
     def extract_glcm_features(self, images, rois=None):
         """
