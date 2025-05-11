@@ -11,20 +11,30 @@ import matplotlib.pyplot as plt  # Add this import at the top of the file
 from joblib import Parallel, delayed
 import random
 import json
+from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
 
 class GLCMModel:
-    def __init__(self, config):
+    def __init__(self, config, classifier_type="lightgbm"):
         """
         Initialize the GLCMModel with a configuration object.
         """
         self.config = config
-        self.model = LGBMClassifier(
-            **config.model_params,
-        )
+        self.classifier_type = classifier_type
+        # Classifier selection
+        if classifier_type == "lightgbm":
+            self.model = LGBMClassifier(**config.model_params)
+        elif classifier_type == "randomforest":
+            self.model = RandomForestClassifier(n_estimators=200)
+        elif classifier_type == "xgboost":
+            self.model = XGBClassifier(n_estimators=200, use_label_encoder=False, eval_metric="logloss")
+        else:
+            raise ValueError(f"Unsupported classifier type: {classifier_type}")
+        
         self.data = None
         self.mlb = None  # MultiLabelBinarizer instance
 
-
+        print(f"Using {classifier_type} as the classifier.")
 
     def extract_glcm_features(self, images, rois=None):
         """
@@ -249,18 +259,32 @@ class GLCMModel:
 
         print("Starting training...")
         
-        self.model.fit(
-            train_features,
-            train_labels,
-            eval_set=[(val_features, val_labels)],
-            eval_metric="logloss",
-            callbacks=[
-                early_stopping(self.config.early_stopping_rounds),
-                log_evaluation(period=1)
-            ]
-        )
+        if self.classifier_type == "lightgbm":
+            self.model.fit(
+                train_features,
+                train_labels,
+                eval_set=[(val_features, val_labels)],
+                eval_metric="logloss",
+                callbacks=[
+                    early_stopping(self.config.early_stopping_rounds),
+                    log_evaluation(period=1)
+                ]
+            )
+        elif self.classifier_type == "xgboost":
+            self.model.fit(
+                train_features,
+                train_labels,
+                eval_set=[(val_features, val_labels)],
+                eval_metric="logloss",
+                early_stopping_rounds=self.config.early_stopping_rounds,
+                verbose=True
+            )
+        elif self.classifier_type == "RandomForest": 
+            self.model.fit(train_features, train_labels)
+
         print("Training completed.")
-        print("Number of trees in the trained model:", self.model.booster_.num_trees())
+        if hasattr(self.model, "booster_"):
+            print("Number of trees in the trained model:", self.model.booster_.num_trees())
 
 
 
@@ -300,13 +324,59 @@ class GLCMModel:
         for (img_idx, roi_idx), prediction in zip(valid_roi_indices, predictions):
             mapped_predictions[img_idx].append(prediction)
 
+        # 🖨️ Print predictions and visualize them
+        for img_idx in range(len(images)):
+            print(f"\n📷 Predictions for Image {img_idx + 1}:")
+            image = images[img_idx]
+            image_rois = rois[img_idx]
+            predicted_labels = mapped_predictions[img_idx]
+
+            if not predicted_labels:
+                print("⚠️ No valid ROIs were processed for this image.")
+                continue
+
+            print(f"ROIs: {image_rois}")
+            print(f"Predicted labels (numeric): {predicted_labels}")
+            if self.mlb:
+                label_names = [self.mlb.classes_[p] for p in predicted_labels]
+                print(f"Predicted labels (named): {label_names}")
+            else:
+                label_names = [str(p) for p in predicted_labels]
+                print("🔍 Note: MultiLabelBinarizer not initialized yet, showing numeric labels only.")
+
+            # 📊 Visualization
+            fig, axs = plt.subplots(1, 2, figsize=(16, 8))
+
+            axs[0].imshow(image, cmap="gray")
+            axs[0].set_title("Original Image")
+            axs[0].axis("off")
+
+            axs[1].imshow(image, cmap="gray")
+            axs[1].set_title(f"Predictions for Image {img_idx + 1}")
+
+            for roi, pred_label in zip(image_rois, predicted_labels):
+                x, y, w, h = map(int, roi)
+                label_name = self.mlb.classes_[pred_label] if self.mlb else str(pred_label)
+                axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor="blue", facecolor="none", linewidth=1.5))
+                axs[1].text(
+                    x, y - 5,
+                    f"Pred: {label_name}",
+                    color="blue",
+                    fontsize=8,
+                    bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
+                )
+
+            axs[1].axis("off")
+            plt.tight_layout()
+            plt.show()
+
         # Return predictions mapped to images and ROIs
         return {
             "predictions": mapped_predictions,
             "rois": rois,
             "images": images,
             "valid_roi_indices": valid_roi_indices
-        }    
+        }   
 
 
 
