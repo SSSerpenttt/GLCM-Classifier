@@ -39,32 +39,37 @@ class GLCMModel:
     def extract_glcm_features(self, images, rois=None):
         """
         Extract GLCM features from a list of grayscale images using parallel processing.
+        Includes features from both full ROI and its center patch.
         Returns both the features and the indices of successfully processed ROIs.
         """
         def process_roi(image, roi, img_idx, roi_idx):
             x, y, w, h = map(int, roi)
 
-            # Clip ROI to valid bounds
+            # Clip ROI coordinates to fit within the image dimensions
             x = max(0, min(x, image.shape[1] - 1))
             y = max(0, min(y, image.shape[0] - 1))
-            w = max(1, min(w, image.shape[1] - x))
-            h = max(1, min(h, image.shape[0] - y))
+            w = max(1, min(w, image.shape[1] - x))  # Ensure width is at least 1
+            h = max(1, min(h, image.shape[0] - y))  # Ensure height is at least 1
 
             cropped_image = image[y:y+h, x:x+w]
+
+            # Skip invalid ROIs
             if cropped_image.size == 0:
                 return None, None
 
-            patch_size = 16  # Size of sampled patches
-            num_random_patches = 5
-
-            def extract_features_from_patch(patch):
+            # Helper function for GLCM feature extraction
+            def compute_glcm_features(region):
+                min_dim = min(region.shape[:2])
+                distances = [1, max(1, min_dim // 4)]
+                angles = self.config.angles
+                levels = self.config.levels
                 glcm = graycomatrix(
-                    patch,
-                    distances=[1, max(1, min(patch.shape) // 4)],
-                    angles=self.config.angles,
-                    levels=self.config.levels,
+                    region,
+                    distances=distances,
+                    angles=angles,
+                    levels=levels,
                     symmetric=True,
-                    normed=True
+                    normed=True,
                 )
                 features = [
                     graycoprops(glcm, prop).flatten()
@@ -72,31 +77,24 @@ class GLCMModel:
                 ]
                 return np.hstack(features)
 
-            # 📌 Sample random patches within the ROI
-            random_features = []
-            for _ in range(num_random_patches):
-                rand_x = random.randint(0, max(0, w - patch_size))
-                rand_y = random.randint(0, max(0, h - patch_size))
-                patch = cropped_image[rand_y:rand_y+patch_size, rand_x:rand_x+patch_size]
-                if patch.shape == (patch_size, patch_size):
-                    random_features.append(extract_features_from_patch(patch))
+            # GLCM from full ROI
+            full_features = compute_glcm_features(cropped_image)
 
-            # 🧿 Extract center patch
-            center_x = max(0, (w - patch_size) // 2)
-            center_y = max(0, (h - patch_size) // 2)
-            center_patch = cropped_image[center_y:center_y+patch_size, center_x:center_x+patch_size]
-            center_features = extract_features_from_patch(center_patch) if center_patch.shape == (patch_size, patch_size) else np.zeros(6 * len(self.config.angles))
-
-            # Aggregate random features (mean)
-            if random_features:
-                random_features_mean = np.mean(random_features, axis=0)
+            # GLCM from center patch
+            patch_w, patch_h = w // 2, h // 2
+            center_x = x + w // 4
+            center_y = y + h // 4
+            center_patch = image[
+                center_y:center_y + patch_h,
+                center_x:center_x + patch_w
+            ]
+            if center_patch.size == 0 or center_patch.shape[0] < 2 or center_patch.shape[1] < 2:
+                center_features = np.zeros_like(full_features)  # fallback to zeros if invalid
             else:
-                random_features_mean = np.zeros_like(center_features)
+                center_features = compute_glcm_features(center_patch)
 
-            # Concatenate center and random features
-            roi_features = np.hstack([center_features, random_features_mean])
+            roi_features = np.hstack([full_features, center_features])
             return roi_features, (img_idx, roi_idx)
-
 
         # Flatten the input for parallel processing
         tasks = []
@@ -119,6 +117,7 @@ class GLCMModel:
                 valid_roi_indices.append(valid_index)
 
         return np.array(features), valid_roi_indices
+
 
 
 
