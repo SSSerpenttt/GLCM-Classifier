@@ -304,7 +304,6 @@ class GLCMModel:
                 train_features,
                 train_labels,
                 eval_set=[(val_features, val_labels)],
-                eval_metric="logloss",
                 early_stopping_rounds=self.config.early_stopping_rounds,
                 evals_result=evals_result,
                 verbose=True
