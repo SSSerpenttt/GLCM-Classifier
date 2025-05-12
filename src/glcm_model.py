@@ -278,6 +278,15 @@ class GLCMModel:
         classifier = self.classifier_type.lower()
 
         if classifier == "lightgbm":
+            best_score = float("inf")
+            def save_best_callback(env):
+                nonlocal best_score
+                current_score = env.evaluation_result_list[0][2]  # ('valid_0', 'logloss', score)
+                if current_score < best_score:
+                    best_score = current_score
+                    print(f"📈 New best logloss: {best_score:.4f}. Saving model...")
+                    self.save_model("lightgbm.best_trained-glcm_model.txt", "lightgbm_mlb.json")
+
             self.model.fit(
                 train_features,
                 train_labels,
@@ -285,19 +294,29 @@ class GLCMModel:
                 eval_metric="logloss",
                 callbacks=[
                     early_stopping(self.config.early_stopping_rounds),
-                    log_evaluation(period=1)
+                    log_evaluation(period=1),
+                    save_best_callback
                 ]
             )
         elif classifier == "xgboost":
+            evals_result = {}
             self.model.fit(
                 train_features,
                 train_labels,
                 eval_set=[(val_features, val_labels)],
+                eval_metric="logloss",
                 early_stopping_rounds=self.config.early_stopping_rounds,
+                evals_result=evals_result,
                 verbose=True
             )
+
+            best_iter = self.model.best_iteration
+            best_score = evals_result["validation_0"]["logloss"][best_iter]
+            print(f"📈 Best logloss at iteration {best_iter}: {best_score:.4f}")
+            self.save_model("xgboost.best_trained-glcm_model.txt", "xgboost_mlb.json")
         elif classifier == "randomforest":
             self.model.fit(train_features, train_labels)
+            self.save_model("randomforest.best_trained-glcm_model.txt", "randomforest_mlb.json")
         else:
             raise ValueError(f"Unsupported classifier: {self.classifier_type}")
 
