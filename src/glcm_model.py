@@ -300,22 +300,26 @@ class GLCMModel:
                 ]
             )
         elif classifier == "xgboost":
-            evals_result = {}
             self.model.fit(
                 train_features,
                 train_labels,
                 eval_set=[(val_features, val_labels)],
-                evals_result=evals_result,
                 verbose=True
             )
+
+            # Retrieve evals_result after training
+            evals_result = self.model.evals_result()
 
             best_iter = self.model.best_iteration
             best_score = evals_result["validation_0"]["logloss"][best_iter]
             print(f"📈 Best logloss at iteration {best_iter}: {best_score:.4f}")
+
             self.save_model("xgboost.best_trained-glcm_model.txt", "xgboost_mlb.json")
+
         elif classifier == "randomforest":
             self.model.fit(train_features, train_labels)
             self.save_model("randomforest.best_trained-glcm_model.txt", "randomforest_mlb.json")
+            
         else:
             raise ValueError(f"Unsupported classifier: {self.classifier_type}")
 
