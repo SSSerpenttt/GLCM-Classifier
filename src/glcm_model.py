@@ -13,6 +13,7 @@ import random
 import json
 from xgboost import XGBClassifier
 from sklearn.ensemble import RandomForestClassifier
+from xgboost.callback import EarlyStopping
 
 class GLCMModel:
     def __init__(self, config):
@@ -304,7 +305,9 @@ class GLCMModel:
                 train_features,
                 train_labels,
                 eval_set=[(val_features, val_labels)],
-                early_stopping_rounds=self.config.early_stopping_rounds,
+                callbacks=[
+                  EarlyStopping(rounds=self.config.early_stopping_rounds)
+                ],
                 evals_result=evals_result,
                 verbose=True
             )
