@@ -26,7 +26,8 @@ class Config:
                 "learning_rate": 0.05,
                 "max_depth": 5,
                 "random_state": 42,
-                "scale_pos_weight": 1,  # Adjust for class imbalance if needed
+                "scale_pos_weight": 1,
+                "early_stopping_rounds" = 10
             }
         elif self.classifier_type == "randomforest":
             self.model_params = {
