@@ -39,20 +39,12 @@ class GLCMModel:
 
 
 
-    def normalize_image(image):
-        """
-        Normalize image to the range [0, 1].
-        """
-        return (image - np.min(image)) / (np.max(image) - np.min(image))
-
-
-
-    def contrast_stretching(image, low_in=0, high_in=255, low_out=0, high_out=255):
+    def preprocess_image(image, low_in=0, high_in=255, low_out=0, high_out=255):
         """
         Apply contrast stretching to enhance the feature differences between deep and shallow regions.
         """
         # Normalize the image to [0, 1]
-        normalized_image = normalize_image(image)
+        normalized_image = (image - np.min(image)) / (np.max(image) - np.min(image))
         
         # Scale the image to the desired range [low_out, high_out]
         stretched_image = (normalized_image * (high_out - low_out)) + low_out
@@ -62,7 +54,7 @@ class GLCMModel:
         
         return stretched_image
 
-
+      
 
     def extract_glcm_features(self, images, rois=None):
         """
@@ -106,7 +98,7 @@ class GLCMModel:
                 return np.hstack(features)
 
             # Normalize and apply contrast stretching to the full ROI
-            cropped_image = contrast_stretching(cropped_image)
+            cropped_image = self.preprocess_image(cropped_image)
 
             # GLCM from full ROI
             full_features = compute_glcm_features(cropped_image)
@@ -128,7 +120,7 @@ class GLCMModel:
                 center_features = np.zeros_like(full_features)  # fallback to zeros if invalid
             else:
                 # Normalize and apply contrast stretching to the center patch
-                center_patch = contrast_stretching(center_patch)
+                center_patch = self.preprocess_image(center_patch)
                 center_features = compute_glcm_features(center_patch)
 
             # Combine full ROI features with center patch features
@@ -156,8 +148,6 @@ class GLCMModel:
                 valid_roi_indices.append(valid_index)
 
         return np.array(features), valid_roi_indices
-
-
 
 
 
