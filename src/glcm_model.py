@@ -38,7 +38,7 @@ class GLCMModel:
         print(f"Using {self.classifier_type} as the classifier.")
 
 
-
+    @staticmethod
     def preprocess_image(image, low_in=0, high_in=255, low_out=0, high_out=255):
         """
         Apply contrast stretching to enhance the feature differences between deep and shallow regions.
