@@ -319,7 +319,7 @@ class GLCMModel:
         elif classifier == "randomforest":
             self.model.fit(train_features, train_labels)
             self.save_model("randomforest.best_trained-glcm_model.txt", "randomforest_mlb.json")
-            
+
         else:
             raise ValueError(f"Unsupported classifier: {self.classifier_type}")
 
@@ -465,7 +465,7 @@ class GLCMModel:
         cm = confusion_matrix(test_labels_numerical, flat_predictions)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.mlb.classes_)
         disp.plot(cmap="Blues", xticks_rotation="vertical")
-        plt.title("Confusion Matrix")
+        plt.title("Confusion Matrix for GLCM model ({self.classifier_type} classifier)")
         plt.show()
 
         # Calculate mAP

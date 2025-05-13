@@ -27,7 +27,8 @@ class Config:
                 "max_depth": 6,
                 "random_state": 42,
                 "scale_pos_weight": 1.97,
-                "early_stopping_rounds": 10
+                "early_stopping_rounds": 10,
+                "tree_method": 'hist'
             }
         elif self.classifier_type == "randomforest":
             self.model_params = {
