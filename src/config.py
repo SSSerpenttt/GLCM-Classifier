@@ -21,12 +21,12 @@ class Config:
             self.model_params = {
                 "objective": "binary:logistic",
                 "eval_metric": "logloss",
-                "n_estimators": 200,
+                "n_estimators": 500,
                 "use_label_encoder": False,
-                "learning_rate": 0.05,
-                "max_depth": 5,
+                "learning_rate": 0.01,
+                "max_depth": 6,
                 "random_state": 42,
-                "scale_pos_weight": 1,
+                "scale_pos_weight": 1.97,
                 "early_stopping_rounds": 10
             }
         elif self.classifier_type == "randomforest":
