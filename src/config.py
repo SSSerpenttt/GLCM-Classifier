@@ -10,7 +10,7 @@ class Config:
         self.data_path = data_path
         self.classifier_type = classifier_type.lower()
         self.epochs = epochs
-        self.early_stopping_rounds = 10
+        self.early_stopping_rounds = 50
         self.logging_level = "INFO"
         self.distances = [1, 2, 3, 4, 5]
         self.angles = [0, np.pi/8, np.pi/4, 3*np.pi/8, np.pi/2, 5*np.pi/8, 3*np.pi/4, 7*np.pi/8]
