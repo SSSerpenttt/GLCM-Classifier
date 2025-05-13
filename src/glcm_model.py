@@ -50,7 +50,7 @@ class GLCMModel:
         stretched_image = (normalized_image * (high_out - low_out)) + low_out
         
         # Clip to ensure values are within the specified range
-        stretched_image = np.clip(stretched_image, low_out, high_out)
+        stretched_image = np.clip(stretched_image, low_out, high_out).astype(np.uint8)
         
         return stretched_image
 
