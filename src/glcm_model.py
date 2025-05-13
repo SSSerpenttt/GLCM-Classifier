@@ -37,6 +37,33 @@ class GLCMModel:
 
         print(f"Using {self.classifier_type} as the classifier.")
 
+
+
+    def normalize_image(image):
+        """
+        Normalize image to the range [0, 1].
+        """
+        return (image - np.min(image)) / (np.max(image) - np.min(image))
+
+
+
+    def contrast_stretching(image, low_in=0, high_in=255, low_out=0, high_out=255):
+        """
+        Apply contrast stretching to enhance the feature differences between deep and shallow regions.
+        """
+        # Normalize the image to [0, 1]
+        normalized_image = normalize_image(image)
+        
+        # Scale the image to the desired range [low_out, high_out]
+        stretched_image = (normalized_image * (high_out - low_out)) + low_out
+        
+        # Clip to ensure values are within the specified range
+        stretched_image = np.clip(stretched_image, low_out, high_out)
+        
+        return stretched_image
+
+
+
     def extract_glcm_features(self, images, rois=None):
         """
         Extract GLCM features from a list of grayscale images using parallel processing.
@@ -78,22 +105,33 @@ class GLCMModel:
                 ]
                 return np.hstack(features)
 
+            # Normalize and apply contrast stretching to the full ROI
+            cropped_image = contrast_stretching(cropped_image)
+
             # GLCM from full ROI
             full_features = compute_glcm_features(cropped_image)
 
-            # GLCM from center patch
-            patch_w, patch_h = w // 2, h // 2
-            center_x = x + w // 4
-            center_y = y + h // 4
-            center_patch = image[
-                center_y:center_y + patch_h,
-                center_x:center_x + patch_w
-            ]
+            # Apply contrast stretching to the center patch
+            scale = 0.3162  # sqrt(0.10), scaling the center area to 10% of the full ROI
+            patch_w = max(1, int(w * scale))  # Ensure patch width is at least 1
+            patch_h = max(1, int(h * scale))  # Ensure patch height is at least 1
+
+            # Center the patch within the full ROI
+            center_x = x + (w - patch_w) // 2
+            center_y = y + (h - patch_h) // 2
+
+            # Extract the center patch
+            center_patch = image[center_y:center_y + patch_h, center_x:center_x + patch_w]
+
+            # Check if the center patch is valid (non-empty and large enough)
             if center_patch.size == 0 or center_patch.shape[0] < 2 or center_patch.shape[1] < 2:
                 center_features = np.zeros_like(full_features)  # fallback to zeros if invalid
             else:
+                # Normalize and apply contrast stretching to the center patch
+                center_patch = contrast_stretching(center_patch)
                 center_features = compute_glcm_features(center_patch)
 
+            # Combine full ROI features with center patch features
             roi_features = np.hstack([full_features, center_features])
             return roi_features, (img_idx, roi_idx)
 
