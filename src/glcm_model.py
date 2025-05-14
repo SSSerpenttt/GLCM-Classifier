@@ -88,7 +88,7 @@ class GLCMModel:
         return np.hstack(features + [entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals])
 
 
-    def process_roi(image, roi, img_idx, roi_idx, preprocess_fn, levels, angles):
+    def process_roi(self, image, roi, img_idx, roi_idx, preprocess_fn, levels, angles):
         x, y, w, h = map(int, roi)
         x = max(0, min(x, image.shape[1] - 1))
         y = max(0, min(y, image.shape[0] - 1))
@@ -100,7 +100,7 @@ class GLCMModel:
             return None, None
 
         cropped = preprocess_fn(cropped)
-        full_feat = compute_glcm_features(cropped, levels, angles)
+        full_feat = self.compute_glcm_features(cropped, levels, angles)
 
         scale = 0.3162
         patch_w, patch_h = max(1, int(w * scale)), max(1, int(h * scale))
@@ -111,7 +111,7 @@ class GLCMModel:
             center_feat = np.zeros_like(full_feat)
         else:
             center_patch = preprocess_fn(center_patch)
-            center_feat = compute_glcm_features(center_patch, levels, angles)
+            center_feat = self.compute_glcm_features(center_patch, levels, angles)
 
         return np.hstack([full_feat, center_feat]), (img_idx, roi_idx)
 
@@ -129,7 +129,7 @@ class GLCMModel:
         ]
 
         results = Parallel(n_jobs=-1, backend='loky', prefer="processes")(
-            delayed(process_roi)(img, roi, i, j, self.preprocess_image, levels, angles)
+            delayed(self.process_roi)(img, roi, i, j, self.preprocess_image, levels, angles)
             for img, roi, i, j in tasks
         )
 
