@@ -59,7 +59,7 @@ class GLCMModel:
     def extract_glcm_features(self, images, rois=None):
         """
         Extract GLCM features from a list of grayscale images using parallel processing.
-        Includes features from both full ROI and its center patch.
+        Includes features from both full ROI and its center patch, including Shannon entropy.
         Returns both the features and the indices of successfully processed ROIs.
         """
         def process_roi(image, roi, img_idx, roi_idx):
@@ -77,12 +77,13 @@ class GLCMModel:
             if cropped_image.size == 0:
                 return None, None
 
-            # Helper function for GLCM feature extraction
+            # Helper function for GLCM feature extraction including entropy
             def compute_glcm_features(region):
                 min_dim = min(region.shape[:2])
                 distances = [1, max(1, min_dim // 4)]
                 angles = self.config.angles
                 levels = self.config.levels
+
                 glcm = graycomatrix(
                     region,
                     distances=distances,
@@ -91,11 +92,26 @@ class GLCMModel:
                     symmetric=True,
                     normed=True,
                 )
+
+                # Compute the standard properties
                 features = [
                     graycoprops(glcm, prop).flatten()
                     for prop in ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM']
                 ]
-                return np.hstack(features)
+
+                # Compute entropy manually for each (distance, angle) pair
+                entropy_vals = []
+                num_levels = glcm.shape[0]
+                for i in range(glcm.shape[2]):
+                    for j in range(glcm.shape[3]):
+                        slice_glcm = glcm[:, :, i, j]
+                        slice_glcm_nonzero = slice_glcm[slice_glcm > 0]
+                        entropy = -np.sum(slice_glcm_nonzero * np.log2(slice_glcm_nonzero))
+                        entropy_vals.append(entropy)
+
+                entropy_vals = np.array(entropy_vals)
+
+                return np.hstack(features + [entropy_vals])
 
             # Normalize and apply contrast stretching to the full ROI
             cropped_image = self.preprocess_image(cropped_image)
@@ -103,23 +119,17 @@ class GLCMModel:
             # GLCM from full ROI
             full_features = compute_glcm_features(cropped_image)
 
-            # Apply contrast stretching to the center patch
+            # Center patch logic
             scale = 0.3162  # sqrt(0.10), scaling the center area to 10% of the full ROI
             patch_w = max(1, int(w * scale))  # Ensure patch width is at least 1
             patch_h = max(1, int(h * scale))  # Ensure patch height is at least 1
-
-            # Center the patch within the full ROI
             center_x = x + (w - patch_w) // 2
             center_y = y + (h - patch_h) // 2
-
-            # Extract the center patch
             center_patch = image[center_y:center_y + patch_h, center_x:center_x + patch_w]
 
-            # Check if the center patch is valid (non-empty and large enough)
             if center_patch.size == 0 or center_patch.shape[0] < 2 or center_patch.shape[1] < 2:
                 center_features = np.zeros_like(full_features)  # fallback to zeros if invalid
             else:
-                # Normalize and apply contrast stretching to the center patch
                 center_patch = self.preprocess_image(center_patch)
                 center_features = compute_glcm_features(center_patch)
 
@@ -148,6 +158,7 @@ class GLCMModel:
                 valid_roi_indices.append(valid_index)
 
         return np.array(features), valid_roi_indices
+
 
 
 
