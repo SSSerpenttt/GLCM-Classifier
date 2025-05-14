@@ -93,25 +93,56 @@ class GLCMModel:
                     normed=True,
                 )
 
-                # Compute the standard properties
+                # Standard GLCM features
                 features = [
                     graycoprops(glcm, prop).flatten()
                     for prop in ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM']
                 ]
 
-                # Compute entropy manually for each (distance, angle) pair
+                # Extra features: entropy, max prob, variance, difference entropy
                 entropy_vals = []
+                max_prob_vals = []
+                variance_vals = []
+                diff_entropy_vals = []
+
                 num_levels = glcm.shape[0]
+                i_vals, j_vals = np.meshgrid(np.arange(num_levels), np.arange(num_levels), indexing='ij')
+
                 for i in range(glcm.shape[2]):
                     for j in range(glcm.shape[3]):
                         slice_glcm = glcm[:, :, i, j]
-                        slice_glcm_nonzero = slice_glcm[slice_glcm > 0]
-                        entropy = -np.sum(slice_glcm_nonzero * np.log2(slice_glcm_nonzero))
+                        slice_nonzero = slice_glcm[slice_glcm > 0]
+
+                        # Shannon Entropy
+                        entropy = -np.sum(slice_nonzero * np.log2(slice_nonzero))
                         entropy_vals.append(entropy)
 
-                entropy_vals = np.array(entropy_vals)
+                        # Max Probability
+                        max_prob = np.max(slice_glcm)
+                        max_prob_vals.append(max_prob)
 
-                return np.hstack(features + [entropy_vals])
+                        # Variance (row marginal mean)
+                        mean_ij = np.sum(i_vals * slice_glcm)
+                        variance = np.sum(slice_glcm * ((i_vals - mean_ij) ** 2))
+                        variance_vals.append(variance)
+
+                        # Difference Entropy
+                        abs_diff = np.abs(i_vals - j_vals)
+                        diff_hist = np.zeros(levels)
+                        for k in range(levels):
+                            diff_hist[k] = np.sum(slice_glcm[abs_diff == k])
+                        diff_hist_nonzero = diff_hist[diff_hist > 0]
+                        diff_entropy = -np.sum(diff_hist_nonzero * np.log2(diff_hist_nonzero))
+                        diff_entropy_vals.append(diff_entropy)
+
+                # Convert to numpy arrays and concatenate
+                entropy_vals = np.array(entropy_vals)
+                max_prob_vals = np.array(max_prob_vals)
+                variance_vals = np.array(variance_vals)
+                diff_entropy_vals = np.array(diff_entropy_vals)
+
+                return np.hstack(features + [entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals])
+
 
             # Normalize and apply contrast stretching to the full ROI
             cropped_image = self.preprocess_image(cropped_image)
@@ -347,12 +378,26 @@ class GLCMModel:
             )
 
             # Retrieve evals_result after training
+            # Retrieve evals_result after training
             evals_result = self.model.evals_result()
 
-            best_iter = self.model.best_iteration
-            best_score = evals_result["validation_0"]["logloss"][best_iter]
-            print(f"📈 Best logloss at iteration {best_iter}: {best_score:.4f}")
+            # Determine the dataset names (usually 'validation_0' and 'validation_1')
+            eval_set_names = list(evals_result.keys())
+            primary_val_set = eval_set_names[0]  # usually 'validation_0'
 
+            # Retrieve best iteration
+            best_iter = self.model.best_iteration
+
+            # Display all evaluation metrics at the best iteration
+            print(f"\n📊 Evaluation Metrics at Best Iteration ({best_iter}):")
+            for metric in self.model.eval_metric:
+                if metric in evals_result[primary_val_set]:
+                    best_value = evals_result[primary_val_set][metric][best_iter]
+                    print(f"✅ {metric.upper()}: {best_value:.4f}")
+                else:
+                    print(f"⚠️  Metric '{metric}' not found in evals_result.")
+
+            # Save the best model and feature importance if needed
             self.save_model("xgboost.best_trained-glcm_model.txt", "xgboost_mlb.json")
 
         elif classifier == "randomforest":
