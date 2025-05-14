@@ -14,6 +14,7 @@ import json
 from xgboost import XGBClassifier
 from sklearn.ensemble import RandomForestClassifier
 from xgboost.callback import EarlyStopping
+import pandas as pd
 
 class GLCMModel:
     def __init__(self, config):
