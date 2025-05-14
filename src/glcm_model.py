@@ -14,7 +14,6 @@ import json
 from xgboost import XGBClassifier
 from sklearn.ensemble import RandomForestClassifier
 from xgboost.callback import EarlyStopping
-import pandas as pd
 
 class GLCMModel:
     def __init__(self, config):
@@ -54,112 +53,142 @@ class GLCMModel:
         stretched_image = np.clip(stretched_image, low_out, high_out).astype(np.uint8)
         
         return stretched_image
+
       
 
-    def compute_glcm_features(region, levels, angles):
-        min_dim = min(region.shape[:2])
-        distances = [1, max(1, min_dim // 4)]
-        glcm = graycomatrix(region, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
+    def extract_glcm_features(self, images, rois=None):
+        """
+        Extract GLCM features from a list of grayscale images using parallel processing.
+        Includes features from both full ROI and its center patch, including Shannon entropy.
+        Returns both the features and the indices of successfully processed ROIs.
+        """
+        def process_roi(image, roi, img_idx, roi_idx):
+            x, y, w, h = map(int, roi)
 
-        # GLCM props
-        features = [graycoprops(glcm, prop).flatten() for prop in
-                    ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM']]
+            # Clip ROI coordinates to fit within the image dimensions
+            x = max(0, min(x, image.shape[1] - 1))
+            y = max(0, min(y, image.shape[0] - 1))
+            w = max(1, min(w, image.shape[1] - x))  # Ensure width is at least 1
+            h = max(1, min(h, image.shape[0] - y))  # Ensure height is at least 1
 
-        entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals = [], [], [], []
-        i_vals, j_vals = np.meshgrid(np.arange(levels), np.arange(levels), indexing='ij')
+            cropped_image = image[y:y+h, x:x+w]
 
-        for i in range(glcm.shape[2]):
-            for j in range(glcm.shape[3]):
-                slice_glcm = glcm[:, :, i, j]
-                nonzero = slice_glcm[slice_glcm > 0]
+            # Skip invalid ROIs
+            if cropped_image.size == 0:
+                return None, None
 
-                entropy_vals.append(-np.sum(nonzero * np.log2(nonzero)))
-                max_prob_vals.append(np.max(slice_glcm))
-                mean = np.sum(i_vals * slice_glcm)
-                variance_vals.append(np.sum(slice_glcm * ((i_vals - mean) ** 2)))
+            # Helper function for GLCM feature extraction including entropy
+            def compute_glcm_features(region):
+                min_dim = min(region.shape[:2])
+                distances = [1, max(1, min_dim // 4)]
+                angles = self.config.angles
+                levels = self.config.levels
 
-                abs_diff = np.abs(i_vals - j_vals)
-                diff_hist = np.zeros(levels)
-                for k in range(levels):
-                    diff_hist[k] = np.sum(slice_glcm[abs_diff == k])
-                diff_nonzero = diff_hist[diff_hist > 0]
-                diff_entropy_vals.append(-np.sum(diff_nonzero * np.log2(diff_nonzero)))
+                glcm = graycomatrix(
+                    region,
+                    distances=distances,
+                    angles=angles,
+                    levels=levels,
+                    symmetric=True,
+                    normed=True,
+                )
 
-        return np.hstack(features + [entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals])
+                # Standard GLCM features
+                features = [
+                    graycoprops(glcm, prop).flatten()
+                    for prop in ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM']
+                ]
+
+                # Extra features: entropy, max prob, variance, difference entropy
+                entropy_vals = []
+                max_prob_vals = []
+                variance_vals = []
+                diff_entropy_vals = []
+
+                num_levels = glcm.shape[0]
+                i_vals, j_vals = np.meshgrid(np.arange(num_levels), np.arange(num_levels), indexing='ij')
+
+                for i in range(glcm.shape[2]):
+                    for j in range(glcm.shape[3]):
+                        slice_glcm = glcm[:, :, i, j]
+                        slice_nonzero = slice_glcm[slice_glcm > 0]
+
+                        # Shannon Entropy
+                        entropy = -np.sum(slice_nonzero * np.log2(slice_nonzero))
+                        entropy_vals.append(entropy)
+
+                        # Max Probability
+                        max_prob = np.max(slice_glcm)
+                        max_prob_vals.append(max_prob)
+
+                        # Variance (row marginal mean)
+                        mean_ij = np.sum(i_vals * slice_glcm)
+                        variance = np.sum(slice_glcm * ((i_vals - mean_ij) ** 2))
+                        variance_vals.append(variance)
+
+                        # Difference Entropy
+                        abs_diff = np.abs(i_vals - j_vals)
+                        diff_hist = np.zeros(levels)
+                        for k in range(levels):
+                            diff_hist[k] = np.sum(slice_glcm[abs_diff == k])
+                        diff_hist_nonzero = diff_hist[diff_hist > 0]
+                        diff_entropy = -np.sum(diff_hist_nonzero * np.log2(diff_hist_nonzero))
+                        diff_entropy_vals.append(diff_entropy)
+
+                # Convert to numpy arrays and concatenate
+                entropy_vals = np.array(entropy_vals)
+                max_prob_vals = np.array(max_prob_vals)
+                variance_vals = np.array(variance_vals)
+                diff_entropy_vals = np.array(diff_entropy_vals)
+
+                return np.hstack(features + [entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals])
 
 
-    def process_roi(self, image, roi, img_idx, roi_idx, preprocess_fn, levels, angles):
-        x, y, w, h = map(int, roi)
-        x = max(0, min(x, image.shape[1] - 1))
-        y = max(0, min(y, image.shape[0] - 1))
-        w = max(1, min(w, image.shape[1] - x))
-        h = max(1, min(h, image.shape[0] - y))
+            # Normalize and apply contrast stretching to the full ROI
+            cropped_image = self.preprocess_image(cropped_image)
 
-        cropped = image[y:y+h, x:x+w]
-        if cropped.size == 0:
-            return None, None
+            # GLCM from full ROI
+            full_features = compute_glcm_features(cropped_image)
 
-        cropped = preprocess_fn(cropped)
-        full_feat = self.compute_glcm_features(cropped, levels, angles)
+            # Center patch logic
+            scale = 0.3162  # sqrt(0.10), scaling the center area to 10% of the full ROI
+            patch_w = max(1, int(w * scale))  # Ensure patch width is at least 1
+            patch_h = max(1, int(h * scale))  # Ensure patch height is at least 1
+            center_x = x + (w - patch_w) // 2
+            center_y = y + (h - patch_h) // 2
+            center_patch = image[center_y:center_y + patch_h, center_x:center_x + patch_w]
 
-        scale = 0.3162
-        patch_w, patch_h = max(1, int(w * scale)), max(1, int(h * scale))
-        center_x, center_y = x + (w - patch_w) // 2, y + (h - patch_h) // 2
-        center_patch = image[center_y:center_y + patch_h, center_x:center_x + patch_w]
+            if center_patch.size == 0 or center_patch.shape[0] < 2 or center_patch.shape[1] < 2:
+                center_features = np.zeros_like(full_features)  # fallback to zeros if invalid
+            else:
+                center_patch = self.preprocess_image(center_patch)
+                center_features = compute_glcm_features(center_patch)
 
-        if center_patch.size == 0 or center_patch.shape[0] < 2 or center_patch.shape[1] < 2:
-            center_feat = np.zeros_like(full_feat)
-        else:
-            center_patch = preprocess_fn(center_patch)
-            center_feat = self.compute_glcm_features(center_patch, levels, angles)
+            # Combine full ROI features with center patch features
+            roi_features = np.hstack([full_features, center_features])
+            return roi_features, (img_idx, roi_idx)
 
-        return np.hstack([full_feat, center_feat]), (img_idx, roi_idx)
+        # Flatten the input for parallel processing
+        tasks = []
+        for img_idx, image in enumerate(images):
+            if rois is not None and img_idx < len(rois):
+                for roi_idx, roi in enumerate(rois[img_idx]):
+                    tasks.append((image, roi, img_idx, roi_idx))
 
-
-    def extract_glcm_features(self, images, rois=None, save_csv_path=None):
-        """Parallel GLCM feature extraction with center patch and entropy/difference entropy."""
-        levels = self.config.levels
-        angles = self.config.angles
-
-        tasks = [
-            (image, roi, img_idx, roi_idx)
-            for img_idx, image in enumerate(images)
-            if rois and img_idx < len(rois)
-            for roi_idx, roi in enumerate(rois[img_idx])
-        ]
-
-        results = Parallel(n_jobs=-1, backend='loky', prefer="processes")(
-            delayed(self.process_roi)(img, roi, i, j, self.preprocess_image, levels, angles)
-            for img, roi, i, j in tasks
+        # Process ROIs in parallel
+        results = Parallel(n_jobs=-1)(
+            delayed(process_roi)(image, roi, img_idx, roi_idx) for image, roi, img_idx, roi_idx in tasks
         )
 
-        valid_results = [r for r in results if r[0] is not None]
-        features = [f for f, _, _ in valid_results]
-        valid_indices = [idx for _, idx, _ in valid_results]
+        # Collect features and valid ROI indices
+        features = []
+        valid_roi_indices = []
+        for feature, valid_index in results:
+            if feature is not None:
+                features.append(feature)
+                valid_roi_indices.append(valid_index)
 
-        # Default save path if none provided
-        if save_csv_path is None:
-            save_csv_path = "glcm_features.csv"
-
-        # Always save CSV
-        rows = []
-        for _, _, metadata in valid_results:
-            row = {
-                "image_index": metadata["image_index"],
-                "roi_index": metadata["roi_index"],
-                "x": metadata["x"],
-                "y": metadata["y"],
-                "w": metadata["w"],
-                "h": metadata["h"],
-            }
-            row.update({f"feature_{i}": v for i, v in enumerate(metadata["features"])})
-            rows.append(row)
-
-        df = pd.DataFrame(rows)
-        df.to_csv(save_csv_path, index=False)
-
-        return np.array(features), list(valid_indices)
-
+        return np.array(features), valid_roi_indices
 
 
 
