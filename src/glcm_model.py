@@ -349,20 +349,25 @@ class GLCMModel:
         classifier = self.classifier_type.lower()
 
         if classifier == "lightgbm":
-            best_score = float("inf")
+            best_score = float("-inf")  # for aucpr, higher is better
+            best_metric = "aucpr"       # change to "logloss" or others if needed
+
             def save_best_callback(env):
                 nonlocal best_score
-                current_score = env.evaluation_result_list[0][2]  # ('valid_0', 'logloss', score)
-                if current_score < best_score:
-                    best_score = current_score
-                    print(f"📈 New best logloss: {best_score:.4f}. Saving model...")
-                    self.save_model("lightgbm.best_trained-glcm_model.txt", "lightgbm_mlb.json")
+                # env.evaluation_result_list: List of tuples like ('valid_0', 'metric_name', score, is_higher_better)
+                for name, metric, score, _ in env.evaluation_result_list:
+                    if metric == best_metric:
+                        if score > best_score:
+                            best_score = score
+                            print(f"📈 New best {best_metric}: {best_score:.5f}. Saving model...")
+                            self.save_model("lightgbm.best_trained-glcm_model.txt", "lightgbm_mlb.json")
+                        break  # Stop once target metric is found
 
             self.model.fit(
                 train_features,
                 train_labels,
                 eval_set=[(val_features, val_labels)],
-                eval_metric="logloss",
+                eval_metric=["logloss", "error", "auc", "aucpr"],
                 callbacks=[
                     early_stopping(self.config.early_stopping_rounds),
                     log_evaluation(period=1),
