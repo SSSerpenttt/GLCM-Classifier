@@ -16,6 +16,7 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost.callback import EarlyStopping
 import pandas as pd
 from IPython.display import display
+import gc
 
 class GLCMModel:
     def __init__(self, config):
@@ -64,6 +65,7 @@ class GLCMModel:
         Includes features from both full ROI and each of its 3x3 patches.
         Returns both the features and the indices of successfully processed ROIs.
         """
+
         def process_roi(image, roi, img_idx, roi_idx):
             x, y, w, h = map(int, roi)
             x = max(0, min(x, image.shape[1] - 1))
@@ -71,7 +73,7 @@ class GLCMModel:
             w = max(1, min(w, image.shape[1] - x))
             h = max(1, min(h, image.shape[0] - y))
 
-            cropped_image = image[y:y+h, x:x+w]
+            cropped_image = image[y:y + h, x:x + w]
             if cropped_image.size == 0:
                 return None, None
 
@@ -102,13 +104,15 @@ class GLCMModel:
                         diff_nonzero = diff_hist[diff_hist > 0]
                         diff_entropy_vals.append(-np.sum(diff_nonzero * np.log2(diff_nonzero)))
 
+                del glcm, i_vals, j_vals, abs_diff, diff_hist, diff_nonzero
+                gc.collect()
+
                 return np.hstack(features + [entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals])
 
             cropped_image = self.preprocess_image(cropped_image)
             full_features = compute_glcm_features(cropped_image)
 
             # Divide ROI into 3x3 grid
-            patch_features = []
             patch_w = max(1, w // 3)
             patch_h = max(1, h // 3)
 
@@ -117,22 +121,25 @@ class GLCMModel:
                 py = y + row * patch_h
                 pw = min(patch_w, image.shape[1] - px)
                 ph = min(patch_h, image.shape[0] - py)
-
-                patch = image[py:py+ph, px:px+pw]
+                patch = image[py:py + ph, px:px + pw]
                 if patch.size == 0 or patch.shape[0] < 2 or patch.shape[1] < 2:
                     return np.zeros_like(full_features)
                 patch = self.preprocess_image(patch)
                 return compute_glcm_features(patch)
 
-            # Use local threads to parallelize the 9 patches within this ROI
             patch_features = Parallel(n_jobs=9, backend='threading')(
                 delayed(extract_patch_feature)(col, row)
                 for row in range(3) for col in range(3)
             )
 
             roi_features = np.hstack([full_features] + patch_features)
+
+            del cropped_image, patch_features, full_features
+            gc.collect()
+
             return roi_features, (img_idx, roi_idx)
 
+        # Create tasks
         tasks = [
             (image, roi, img_idx, roi_idx)
             for img_idx, image in enumerate(images)
@@ -140,15 +147,20 @@ class GLCMModel:
             for roi_idx, roi in enumerate(rois[img_idx])
         ]
 
-        results = Parallel(n_jobs=-1)(delayed(process_roi)(img, roi, i, j)
+        # Process in parallel
+        results = Parallel(n_jobs=4)(delayed(process_roi)(img, roi, i, j)
                                     for img, roi, i, j in tasks)
 
+        # Collect results
         features = []
         valid_roi_indices = []
         for feature, valid_index in results:
             if feature is not None:
                 features.append(feature)
                 valid_roi_indices.append(valid_index)
+
+        del results, tasks
+        gc.collect()
 
         return np.array(features), valid_roi_indices
 
