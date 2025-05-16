@@ -1,7 +1,7 @@
 import numpy as np
 import lightgbm as lgb
 from lightgbm import LGBMClassifier, early_stopping, log_evaluation
-from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay, log_loss, roc_auc_score
 from sklearn.preprocessing import MultiLabelBinarizer
 from skimage.feature import graycomatrix, graycoprops
 import cv2  # For image processing
@@ -384,6 +384,35 @@ class GLCMModel:
 
         elif classifier == "randomforest":
             self.model.fit(train_features, train_labels)
+
+            # Predict probabilities and classes for validation set
+            val_probs = self.model.predict_proba(val_features)
+            val_preds = np.argmax(val_probs, axis=1) if val_probs.shape[1] > 1 else (val_probs > 0.5).astype(int)
+            
+            # If using MultiLabelBinarizer
+            if hasattr(self, "mlb") and self.mlb:
+                val_labels_bin = self.preprocess_labels(val_labels)  # binary labels
+            else:
+                val_labels_bin = val_labels
+
+            # Logloss
+            logloss = log_loss(val_labels_bin, val_probs)
+            
+            # AUC and AUCPR
+            auc = roc_auc_score(val_labels_bin, val_probs[:, 1])
+            aucpr = average_precision_score(val_labels_bin, val_probs[:, 1])
+            
+            # Gini = 2*AUC - 1
+            gini = 2 * auc - 1
+
+            print("\n📊 Validation Metrics (RandomForest):")
+            print(f"✅ LogLoss: {logloss:.4f}")
+            print(f"✅ AUC:     {auc:.4f}")
+            print(f"✅ GINI:    {gini:.4f}")
+            print(f"✅ AUCPR:   {aucpr:.4f}")
+            print(f"✅ Accuracy:{accuracy_score(val_labels_bin, val_preds):.4f}")
+
+            # Save the model and label binarizer
             self.save_model("randomforest.best_trained-glcm_model.txt", "randomforest_mlb.json")
 
         else:
@@ -403,41 +432,32 @@ class GLCMModel:
         """
         Make predictions using the trained model.
         The model will infer depth labels for each ROI based on GLCM features.
-
-        Args:
-            images (list or np.array): List or array of grayscale images to predict on.
-            rois (list): List of ROIs for each image.
-
-        Returns:
-            dict: A dictionary containing predictions, ROIs, and images.
+        Also displays summarized GLCM feature means.
         """
         if self.model is None:
             raise ValueError("Model is not trained yet. Train the model before making predictions.")
 
         print("Extracting GLCM features for the specified data...")
         input_features = []
-        valid_roi_indices = []  # Track valid ROI indices
+        valid_roi_indices = []
+
         for idx in tqdm(range(len(images)), desc="Prediction Progress"):
             features, local_indices = self.extract_glcm_features([images[idx]], [rois[idx]])
             input_features.extend(features)
             valid_roi_indices.extend([(idx, roi_idx) for (_, roi_idx) in local_indices])
 
         input_features = np.array(input_features)
-
         print(f"[Debug] Extracted input features shape: {input_features.shape}")
         print(f"[Debug] Total ROI predictions expected: {len(input_features)}")
 
-        # Predict depth labels for all ROIs
         predictions = self.model.predict(input_features)
 
-        # Map predictions back to their corresponding images and ROIs
         mapped_predictions = [[] for _ in range(len(images))]
         for (img_idx, roi_idx), prediction in zip(valid_roi_indices, predictions):
             mapped_predictions[img_idx].append(prediction)
 
-        # ✅ Visualize up to 5 randomly chosen images
         sampled_image_indices = random.sample(range(len(images)), min(5, len(images)))
-        # for img_idx in sampled_image_indices:
+
         for img_idx in sampled_image_indices:
             print(f"\n📷 Predictions for Image {img_idx + 1}:")
             image = images[img_idx]
@@ -457,7 +477,6 @@ class GLCMModel:
                 label_names = [str(p) for p in predicted_labels]
                 print("🔍 Note: MultiLabelBinarizer not initialized yet, showing numeric labels only.")
 
-            # Visualization: show image + predictions
             fig, axs = plt.subplots(1, 2, figsize=(16, 8))
             axs[0].imshow(image, cmap="gray")
             axs[0].set_title("Original Image")
@@ -467,9 +486,15 @@ class GLCMModel:
             axs[1].set_title(f"Predictions for Image {img_idx + 1}")
             axs[1].axis("off")
 
-            # Prepare DataFrame to show GLCM features for sampled ROIs
             glcm_table_rows = []
-            glcm_table_columns = [f"F{i}" for i in range(input_features.shape[1])]
+            metric_names = [
+                "contrast", "dissimilarity", "homogeneity", "energy", "correlation", "ASM",
+                "entropy", "max_prob", "variance", "diff_entropy"
+            ]
+
+            num_metrics = len(metric_names)
+            num_segments = 10  # 1 ROI + 9 patches
+            values_per_metric = input_features.shape[1] // (num_metrics * num_segments)
 
             sampled_data = list(zip(image_rois, predicted_labels))
             sampled_features = [input_features[i] for i, (img_i, _) in enumerate(valid_roi_indices) if img_i == img_idx]
@@ -490,28 +515,31 @@ class GLCMModel:
                     "ROI": f"[{x}, {y}, {w}, {h}]",
                     "Predicted Label": label_name
                 }
-                # Attach feature vector for this ROI
+
                 if i < len(sampled_features):
-                    glcm_values = sampled_features[i]
-                    for j, val in enumerate(glcm_values):
-                        glcm_row[f"F{j}"] = round(val, 4)
+                    full_vector = sampled_features[i]
+                    reshaped = full_vector.reshape(num_metrics, num_segments, values_per_metric)
+                    means = reshaped.mean(axis=(1, 2))  # Mean over all segments and angles/distances
+
+                    for j, metric in enumerate(metric_names):
+                        glcm_row[f"{metric}_mean"] = round(means[j], 4)
+
                 glcm_table_rows.append(glcm_row)
 
             plt.tight_layout()
             plt.show()
 
-            # Display feature table
             glcm_df = pd.DataFrame(glcm_table_rows)
-            print("📋 GLCM Feature Table for Sampled ROIs:")
+            print("📋 GLCM Feature Summary Table:")
             display(glcm_df)
 
-        # Return predictions mapped to images and ROIs
         return {
             "predictions": mapped_predictions,
             "rois": rois,
             "images": images,
             "valid_roi_indices": valid_roi_indices
         }
+
 
 
 
