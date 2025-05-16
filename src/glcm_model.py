@@ -395,22 +395,25 @@ class GLCMModel:
             else:
                 val_labels_bin = val_labels
 
-            # Logloss
-            logloss = log_loss(val_labels_bin, val_probs)
-            
-            # AUC and AUCPR
-            auc = roc_auc_score(val_labels_bin, val_probs[:, 1])
-            aucpr = average_precision_score(val_labels_bin, val_probs[:, 1])
-            
-            # Gini = 2*AUC - 1
-            gini = 2 * auc - 1
+            # Check class balance in validation set
+            unique_val_classes = np.unique(val_labels_bin)
+            if len(unique_val_classes) < 2:
+                print("⚠️ Only one class present in validation labels. Skipping logloss, AUC, AUCPR.")
+                logloss = auc = aucpr = gini = float('nan')
+            else:
+                logloss = log_loss(val_labels_bin, val_probs, labels=np.unique(train_labels))
+                auc = roc_auc_score(val_labels_bin, val_probs[:, 1])
+                aucpr = average_precision_score(val_labels_bin, val_probs[:, 1])
+                gini = 2 * auc - 1
+
+            accuracy = accuracy_score(val_labels_bin, val_preds)
 
             print("\n📊 Validation Metrics (RandomForest):")
-            print(f"✅ LogLoss: {logloss:.4f}")
-            print(f"✅ AUC:     {auc:.4f}")
-            print(f"✅ GINI:    {gini:.4f}")
-            print(f"✅ AUCPR:   {aucpr:.4f}")
-            print(f"✅ Accuracy:{accuracy_score(val_labels_bin, val_preds):.4f}")
+            print(f"✅ Accuracy : {accuracy:.4f}")
+            print(f"✅ LogLoss  : {logloss:.4f}")
+            print(f"✅ AUC      : {auc:.4f}")
+            print(f"✅ GINI     : {gini:.4f}")
+            print(f"✅ AUCPR    : {aucpr:.4f}")
 
             # Save the model and label binarizer
             self.save_model("randomforest.best_trained-glcm_model.txt", "randomforest_mlb.json")
