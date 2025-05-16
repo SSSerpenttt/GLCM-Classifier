@@ -112,19 +112,23 @@ class GLCMModel:
             patch_w = max(1, w // 3)
             patch_h = max(1, h // 3)
 
-            for row in range(3):
-                for col in range(3):
-                    px = x + col * patch_w
-                    py = y + row * patch_h
-                    pw = min(patch_w, image.shape[1] - px)
-                    ph = min(patch_h, image.shape[0] - py)
+            def extract_patch_feature(col, row):
+                px = x + col * patch_w
+                py = y + row * patch_h
+                pw = min(patch_w, image.shape[1] - px)
+                ph = min(patch_h, image.shape[0] - py)
 
-                    patch = image[py:py+ph, px:px+pw]
-                    if patch.size == 0 or patch.shape[0] < 2 or patch.shape[1] < 2:
-                        patch_features.append(np.zeros_like(full_features))
-                    else:
-                        patch = self.preprocess_image(patch)
-                        patch_features.append(compute_glcm_features(patch))
+                patch = image[py:py+ph, px:px+pw]
+                if patch.size == 0 or patch.shape[0] < 2 or patch.shape[1] < 2:
+                    return np.zeros_like(full_features)
+                patch = self.preprocess_image(patch)
+                return compute_glcm_features(patch)
+
+            # Use local threads to parallelize the 9 patches within this ROI
+            patch_features = Parallel(n_jobs=9, backend='threading')(
+                delayed(extract_patch_feature)(col, row)
+                for row in range(3) for col in range(3)
+            )
 
             roi_features = np.hstack([full_features] + patch_features)
             return roi_features, (img_idx, roi_idx)
