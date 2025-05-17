@@ -41,27 +41,27 @@ class GLCMModel:
         print(f"Using {self.classifier_type} as the classifier.")
 
 
-        @staticmethod
-        def preprocess_image(image, clipLimit=2.0, tileGridSize=(8, 8)):
-            """
-            Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to enhance contrast.
-            """
-            # Ensure image is 8-bit unsigned integer type, as required by CLAHE
-            if image.dtype != np.uint8:
-                # Scale to 0-255 if it's float or other types, then convert
-                if np.max(image) > 1.0: # Assuming it's not already normalized to [0, 1]
-                    image = (image - np.min(image)) / (np.max(image) - np.min(image)) * 255
-                else: # Assuming it's normalized to [0, 1]
-                    image = image * 255
-                image = image.astype(np.uint8)
+    @staticmethod
+    def preprocess_image(image, clipLimit=2.0, tileGridSize=(8, 8)):
+        """
+        Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to enhance contrast.
+        """
+        # Ensure image is 8-bit unsigned integer type, as required by CLAHE
+        if image.dtype != np.uint8:
+            # Scale to 0-255 if it's float or other types, then convert
+            if np.max(image) > 1.0: # Assuming it's not already normalized to [0, 1]
+                image = (image - np.min(image)) / (np.max(image) - np.min(image)) * 255
+            else: # Assuming it's normalized to [0, 1]
+                image = image * 255
+            image = image.astype(np.uint8)
 
-            # Create a CLAHE object
-            clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
+        # Create a CLAHE object
+        clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
 
-            # Apply CLAHE to the image
-            processed_image = clahe.apply(image)
+        # Apply CLAHE to the image
+        processed_image = clahe.apply(image)
 
-            return processed_image
+        return processed_image
 
       
 
