@@ -41,21 +41,27 @@ class GLCMModel:
         print(f"Using {self.classifier_type} as the classifier.")
 
 
-    @staticmethod
-    def preprocess_image(image, low_in=0, high_in=255, low_out=0, high_out=255):
-        """
-        Apply contrast stretching to enhance the feature differences between deep and shallow regions.
-        """
-        # Normalize the image to [0, 1]
-        normalized_image = (image - np.min(image)) / (np.max(image) - np.min(image))
-        
-        # Scale the image to the desired range [low_out, high_out]
-        stretched_image = (normalized_image * (high_out - low_out)) + low_out
-        
-        # Clip to ensure values are within the specified range
-        stretched_image = np.clip(stretched_image, low_out, high_out).astype(np.uint8)
-        
-        return stretched_image
+        @staticmethod
+        def preprocess_image(image, clipLimit=2.0, tileGridSize=(8, 8)):
+            """
+            Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to enhance contrast.
+            """
+            # Ensure image is 8-bit unsigned integer type, as required by CLAHE
+            if image.dtype != np.uint8:
+                # Scale to 0-255 if it's float or other types, then convert
+                if np.max(image) > 1.0: # Assuming it's not already normalized to [0, 1]
+                    image = (image - np.min(image)) / (np.max(image) - np.min(image)) * 255
+                else: # Assuming it's normalized to [0, 1]
+                    image = image * 255
+                image = image.astype(np.uint8)
+
+            # Create a CLAHE object
+            clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
+
+            # Apply CLAHE to the image
+            processed_image = clahe.apply(image)
+
+            return processed_image
 
       
 
@@ -84,10 +90,12 @@ class GLCMModel:
                 levels = self.config.levels
 
                 glcm = graycomatrix(region, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
-                features = [graycoprops(glcm, prop).flatten() for prop in
-                            ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM']]
 
-                entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals = [], [], [], []
+                # Keep only contrast, homogeneity, energy, correlation
+                features = [graycoprops(glcm, prop).flatten() for prop in
+                            ['contrast', 'homogeneity', 'energy', 'correlation']]
+
+                entropy_vals, max_prob_vals = [], []
                 i_vals, j_vals = np.meshgrid(np.arange(levels), np.arange(levels), indexing='ij')
 
                 for i in range(glcm.shape[2]):
@@ -96,18 +104,11 @@ class GLCMModel:
                         nonzero = slice_glcm[slice_glcm > 0]
                         entropy_vals.append(-np.sum(nonzero * np.log2(nonzero)))
                         max_prob_vals.append(np.max(slice_glcm))
-                        mean = np.sum(i_vals * slice_glcm)
-                        variance_vals.append(np.sum(slice_glcm * ((i_vals - mean) ** 2)))
-                        abs_diff = np.abs(i_vals - j_vals)
-                        diff_hist = np.zeros(levels)
-                        np.add.at(diff_hist, abs_diff.ravel(), slice_glcm.ravel())
-                        diff_nonzero = diff_hist[diff_hist > 0]
-                        diff_entropy_vals.append(-np.sum(diff_nonzero * np.log2(diff_nonzero)))
 
-                del glcm, i_vals, j_vals, abs_diff, diff_hist, diff_nonzero
+                del glcm, i_vals, j_vals
                 gc.collect()
 
-                return np.hstack(features + [entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals])
+                return np.hstack(features + [entropy_vals, max_prob_vals])
 
             cropped_image = self.preprocess_image(cropped_image)
             full_features = compute_glcm_features(cropped_image)
@@ -163,6 +164,7 @@ class GLCMModel:
         gc.collect()
 
         return np.array(features), valid_roi_indices
+
 
 
 
@@ -295,7 +297,38 @@ class GLCMModel:
         # Debug: Print final shapes
         print(f"Final shape of train_features: {train_features.shape}")
         print(f"Final shape of train_labels: {train_labels.shape}")
-        
+
+        print("\n📋 Mean GLCM Feature Values by Class (Training Set):")
+        df_glcm = pd.DataFrame(train_features)
+        df_glcm["Label"] = train_labels
+
+        # Number of GLCM properties per segment (patch + full ROI)
+        glcm_properties = [
+            "contrast", "homogeneity", "energy",
+            "correlation", "entropy", "max_prob",
+            "cluster_shade", "cluster_prominence"
+        ]
+        num_glcm_props = len(glcm_properties)
+        num_total_features = train_features.shape[1]
+        num_segments = num_total_features // num_glcm_props
+
+        # Compute class-wise mean for each GLCM property across all segments
+        grouped = df_glcm.groupby("Label").mean()
+        summary_by_label = pd.DataFrame(index=grouped.index)
+
+        for i, prop in enumerate(glcm_properties):
+            prop_indices = list(range(i, num_total_features, num_glcm_props))
+            summary_by_label[f"{prop}_mean"] = grouped.iloc[:, prop_indices].mean(axis=1)
+
+        # Rename class indices to names if mlb (MultiLabelBinarizer) is available
+        if hasattr(self, "mlb") and self.mlb:
+            summary_by_label.index = [self.mlb.classes_[int(i)] for i in summary_by_label.index]
+
+        # Display summary with full precision
+        with pd.option_context("display.max_columns", None, "display.precision", 4):
+            display(summary_by_label)
+
+
         # Similar process for validation data
         print("Extracting GLCM features for validation data...")
         val_features = []
@@ -540,7 +573,8 @@ class GLCMModel:
             "predictions": mapped_predictions,
             "rois": rois,
             "images": images,
-            "valid_roi_indices": valid_roi_indices
+            "valid_roi_indices": valid_roi_indices,
+            "features": input_features
         }
 
 
@@ -631,6 +665,43 @@ class GLCMModel:
 
             plt.tight_layout()
             plt.show()
+
+        print("\n📋 Mean GLCM Feature Values by Class (from Evaluation Set):")
+        eval_feature_matrix = np.array(predictions_data["features"])  # Ensure predict() returns this
+        label_vector = np.array(test_labels_numerical)
+
+        # Create a DataFrame with features and labels
+        df_features = pd.DataFrame(eval_feature_matrix)
+        df_features["label"] = label_vector
+
+        # Compute mean feature values grouped by label
+        grouped = df_features.groupby("label").mean()
+
+        # Define GLCM properties based on your extraction
+        glcm_properties = [
+            "contrast", "homogeneity", "energy",
+            "correlation", "entropy", "max_prob",
+            "cluster_shade", "cluster_prominence"
+        ]
+
+        num_glcm_props = len(glcm_properties)
+        num_regions = eval_feature_matrix.shape[1] // num_glcm_props  # e.g., 10 regions (1 ROI + 9 patches)
+
+        # Initialize DataFrame to hold summarized means per class
+        summary_by_label = pd.DataFrame(index=grouped.index)
+
+        # For each GLCM property, average its values across all regions (patches + ROI)
+        for i, prop in enumerate(glcm_properties):
+            prop_indices = list(range(i, eval_feature_matrix.shape[1], num_glcm_props))
+            summary_by_label[f"{prop}_mean"] = grouped.iloc[:, prop_indices].mean(axis=1)
+
+        # Replace numeric labels with class names if mlb is defined
+        if hasattr(self, "mlb") and self.mlb:
+            summary_by_label.index = [self.mlb.classes_[int(i)] for i in summary_by_label.index]
+
+        # Display summary with precision and all columns visible
+        with pd.option_context("display.max_columns", None, "display.precision", 4):
+            display(summary_by_label)
 
         # Return accuracy, report, and predictions
         return accuracy, report, predictions
