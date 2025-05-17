@@ -67,9 +67,12 @@ class GLCMModel:
 
     def extract_glcm_features(self, images, rois=None):
         """
-        Extract GLCM features from a list of grayscale images using parallel processing.
-        Includes features from both full ROI and each of its 3x3 patches.
-        Returns both the features and the indices of successfully processed ROIs.
+        Extract summarized GLCM features from a list of grayscale images.
+        For each ROI:
+            - Compute full ROI GLCM features.
+            - Divide ROI into 3x3 patches and compute GLCM features.
+            - Compute summary statistics (mean, median, std, min, max, skewness) over patch features.
+            - Concatenate ROI features with the summarized patch features.
         """
 
         def process_roi(image, roi, img_idx, roi_idx):
@@ -90,12 +93,10 @@ class GLCMModel:
                 levels = self.config.levels
 
                 glcm = graycomatrix(region, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
-
-                # Keep only contrast, homogeneity, energy, correlation
                 features = [graycoprops(glcm, prop).flatten() for prop in
-                            ['contrast', 'homogeneity', 'energy', 'correlation']]
+                            ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM']]
 
-                entropy_vals, max_prob_vals = [], []
+                entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals = [], [], [], []
                 i_vals, j_vals = np.meshgrid(np.arange(levels), np.arange(levels), indexing='ij')
 
                 for i in range(glcm.shape[2]):
@@ -104,16 +105,23 @@ class GLCMModel:
                         nonzero = slice_glcm[slice_glcm > 0]
                         entropy_vals.append(-np.sum(nonzero * np.log2(nonzero)))
                         max_prob_vals.append(np.max(slice_glcm))
+                        mean = np.sum(i_vals * slice_glcm)
+                        variance_vals.append(np.sum(slice_glcm * ((i_vals - mean) ** 2)))
+                        abs_diff = np.abs(i_vals - j_vals)
+                        diff_hist = np.zeros(levels)
+                        np.add.at(diff_hist, abs_diff.ravel(), slice_glcm.ravel())
+                        diff_nonzero = diff_hist[diff_hist > 0]
+                        diff_entropy_vals.append(-np.sum(diff_nonzero * np.log2(diff_nonzero)))
 
-                del glcm, i_vals, j_vals
+                del glcm, i_vals, j_vals, abs_diff, diff_hist, diff_nonzero
                 gc.collect()
 
-                return np.hstack(features + [entropy_vals, max_prob_vals])
+                return np.hstack(features + [entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals])
 
             cropped_image = self.preprocess_image(cropped_image)
             full_features = compute_glcm_features(cropped_image)
 
-            # Divide ROI into 3x3 grid
+            # Divide ROI into 3x3 patches
             patch_w = max(1, w // 3)
             patch_h = max(1, h // 3)
 
@@ -133,9 +141,22 @@ class GLCMModel:
                 for row in range(3) for col in range(3)
             )
 
-            roi_features = np.hstack([full_features] + patch_features)
+            patch_features_arr = np.vstack(patch_features)
 
-            del cropped_image, patch_features, full_features
+            # Compute statistical summaries across patches
+            mean_feat = np.mean(patch_features_arr, axis=0)
+            median_feat = np.median(patch_features_arr, axis=0)
+            std_feat = np.std(patch_features_arr, axis=0)
+            min_feat = np.min(patch_features_arr, axis=0)
+            max_feat = np.max(patch_features_arr, axis=0)
+            skew_feat = scipy.stats.skew(patch_features_arr, axis=0)
+            skew_feat = np.nan_to_num(skew_feat, nan=0.0)
+
+            # Combine summary stats and full ROI features
+            summary_stats = np.hstack([mean_feat, median_feat, std_feat, min_feat, max_feat, skew_feat])
+            roi_features = np.hstack([full_features, summary_stats])
+
+            del cropped_image, patch_features, full_features, patch_features_arr
             gc.collect()
 
             return roi_features, (img_idx, roi_idx)
@@ -298,36 +319,41 @@ class GLCMModel:
         print(f"Final shape of train_features: {train_features.shape}")
         print(f"Final shape of train_labels: {train_labels.shape}")
 
-        print("\n📋 Mean GLCM Feature Values by Class (Training Set):")
+        print("\n📋 GLCM Feature Summary by Class (Training Set):")
+
+        # Convert features to DataFrame and attach labels
         df_glcm = pd.DataFrame(train_features)
         df_glcm["Label"] = train_labels
 
-        # Number of GLCM properties per segment (patch + full ROI)
+        # GLCM properties and the statistics you've extracted per property
         glcm_properties = [
             "contrast", "homogeneity", "energy",
             "correlation", "entropy", "max_prob",
             "cluster_shade", "cluster_prominence"
         ]
-        num_glcm_props = len(glcm_properties)
-        num_total_features = train_features.shape[1]
-        num_segments = num_total_features // num_glcm_props
+        stats = ["mean", "median", "std", "min", "max", "skew"]
 
-        # Compute class-wise mean for each GLCM property across all segments
+        # Rename the feature columns in the DataFrame
+        column_names = [
+            f"{prop}_{stat}"
+            for prop in glcm_properties
+            for stat in stats
+        ]
+        df_glcm.columns = column_names + ["Label"]
+
+        # Group by label and compute the mean of each feature
         grouped = df_glcm.groupby("Label").mean()
-        summary_by_label = pd.DataFrame(index=grouped.index)
 
-        for i, prop in enumerate(glcm_properties):
-            prop_indices = list(range(i, num_total_features, num_glcm_props))
-            summary_by_label[f"{prop}_mean"] = grouped.iloc[:, prop_indices].mean(axis=1)
-
-        # Rename class indices to names if mlb (MultiLabelBinarizer) is available
+        # If label names exist (from MultiLabelBinarizer), use them
         if hasattr(self, "mlb") and self.mlb:
-            summary_by_label.index = [self.mlb.classes_[int(i)] for i in summary_by_label.index]
+            grouped.index = [self.mlb.classes_[int(i)] for i in grouped.index]
 
-        # Display summary with full precision
-        with pd.option_context("display.max_columns", None, "display.precision", 4):
-            display(summary_by_label)
-
+        # Create and display a summary table for each statistic
+        for stat in stats:
+            stat_table = grouped[[f"{prop}_{stat}" for prop in glcm_properties]]
+            print(f"\n📊 GLCM {stat.upper()} values by class:")
+            with pd.option_context("display.max_columns", None, "display.precision", 4):
+                display(stat_table)
 
         # Similar process for validation data
         print("Extracting GLCM features for validation data...")
@@ -666,42 +692,44 @@ class GLCMModel:
             plt.tight_layout()
             plt.show()
 
-        print("\n📋 Mean GLCM Feature Values by Class (from Evaluation Set):")
+        print("\n📋 GLCM Feature Summary by Class (from Evaluation Set):")
         eval_feature_matrix = np.array(predictions_data["features"])  # Ensure predict() returns this
         label_vector = np.array(test_labels_numerical)
 
-        # Create a DataFrame with features and labels
-        df_features = pd.DataFrame(eval_feature_matrix)
-        df_features["label"] = label_vector
-
-        # Compute mean feature values grouped by label
-        grouped = df_features.groupby("label").mean()
-
-        # Define GLCM properties based on your extraction
+        # Define GLCM properties and statistics
         glcm_properties = [
             "contrast", "homogeneity", "energy",
             "correlation", "entropy", "max_prob",
             "cluster_shade", "cluster_prominence"
         ]
+        stats = ["mean", "median", "std", "min", "max", "skew"]
 
         num_glcm_props = len(glcm_properties)
-        num_regions = eval_feature_matrix.shape[1] // num_glcm_props  # e.g., 10 regions (1 ROI + 9 patches)
+        num_regions = eval_feature_matrix.shape[1] // num_glcm_props  # e.g., 10 regions (ROI + patches)
 
-        # Initialize DataFrame to hold summarized means per class
-        summary_by_label = pd.DataFrame(index=grouped.index)
+        # Rename columns to match "property_stat" pattern
+        column_names = [
+            f"{prop}_{stat}"
+            for prop in glcm_properties
+            for stat in stats
+        ]
+        df_features = pd.DataFrame(eval_feature_matrix, columns=column_names)
+        df_features["label"] = label_vector
 
-        # For each GLCM property, average its values across all regions (patches + ROI)
-        for i, prop in enumerate(glcm_properties):
-            prop_indices = list(range(i, eval_feature_matrix.shape[1], num_glcm_props))
-            summary_by_label[f"{prop}_mean"] = grouped.iloc[:, prop_indices].mean(axis=1)
+        # Group by label and compute mean for each feature column
+        grouped = df_features.groupby("label").mean()
 
         # Replace numeric labels with class names if mlb is defined
         if hasattr(self, "mlb") and self.mlb:
-            summary_by_label.index = [self.mlb.classes_[int(i)] for i in summary_by_label.index]
+            grouped.index = [self.mlb.classes_[int(i)] for i in grouped.index]
 
-        # Display summary with precision and all columns visible
-        with pd.option_context("display.max_columns", None, "display.precision", 4):
-            display(summary_by_label)
+        # Display separate tables for each statistic
+        for stat in stats:
+            stat_table = grouped[[f"{prop}_{stat}" for prop in glcm_properties]]
+            print(f"\n📊 GLCM {stat.upper()} values by class:")
+            with pd.option_context("display.max_columns", None, "display.precision", 4):
+                display(stat_table)
+
 
         # Return accuracy, report, and predictions
         return accuracy, report, predictions
