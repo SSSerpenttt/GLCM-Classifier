@@ -278,64 +278,74 @@ class GLCMModel:
 
     def create_feature_summary_tables(self, features, labels, save_to_csv=False, prefix="GLCM_Stats"):
         """
-        Create and print summary tables for GLCM features grouped by class label.
-        Supports dynamically generated features, showing mean, median, std, min, max, skew.
-        Assumes features shape = (n_samples, n_features).
-        
-        Parameters:
-            features (np.array): Feature matrix of shape (n_samples, n_features)
-            labels (list or array): Class labels for each sample
-            save_to_csv (bool): Whether to save the summary stats as CSV files
-            prefix (str): File prefix to use when saving CSVs
+        Create summary tables for each statistic with:
+        - Rows: class labels (depth classes)
+        - Columns: GLCM base features (aggregated over patches)
         """
         import pandas as pd
         from scipy.stats import skew
         from IPython.display import display
 
-        # Try generating feature names dynamically
         if features.ndim != 2:
             raise ValueError("Features must be a 2D array.")
 
-        num_features = features.shape[1]
         base_feature_names = [
             "contrast", "homogeneity", "entropy", "max_prob",
             "variance", "diff_entropy"
         ]
 
-        num_base_features = len(base_feature_names)
-        if num_features % num_base_features != 0:
-            print("⚠️ Feature count not cleanly divisible by base features. Using generic f0...fn names.")
+        num_features = features.shape[1]
+        num_base = len(base_feature_names)
+        if num_features % num_base != 0:
+            print("⚠️ Feature count not divisible by base features. Using generic names.")
             feature_names = [f"f{i}" for i in range(num_features)]
         else:
-            num_sets = num_features // num_base_features
-            feature_names = []
-            for i in range(num_sets):
-                feature_names += [f"{base}_{i}" for base in base_feature_names]
+            reps = num_features // num_base
+            feature_names = [f"{base}_{i}" for i in range(reps) for base in base_feature_names]
 
-        # Create dataframe and group
         df = pd.DataFrame(features, columns=feature_names)
         df["Label"] = labels
+
         grouped = df.groupby("Label")
 
-        # Compute statistics
-        stats = {
-            "Mean": grouped.mean(),
-            "Median": grouped.median(),
-            "Std": grouped.std(),
-            "Min": grouped.min(),
-            "Max": grouped.max(),
-            "Skew": grouped.apply(lambda g: skew(g.drop(columns="Label"), axis=0)).apply(pd.Series)
-        }
+        # Initialize dict to store aggregated stats per feature
+        agg_stats = {stat: pd.DataFrame(index=grouped.groups.keys(), columns=base_feature_names) for stat in ["Mean", "Median", "Std", "Min", "Max", "Skew"]}
 
-        for stat_name, stat_df in stats.items():
-            print(f"\n📊 GLCM Feature {stat_name} by Class:")
+        for base_feature in base_feature_names:
+            # All columns for this feature (all patches)
+            related_cols = [col for col in df.columns if col.startswith(base_feature)]
+            subset = df[related_cols + ["Label"]]
+
+            grouped_subset = subset.groupby("Label")
+
+            # Compute all stats per patch per class
+            mean_df = grouped_subset.mean()
+            median_df = grouped_subset.median()
+            std_df = grouped_subset.std()
+            min_df = grouped_subset.min()
+            max_df = grouped_subset.max()
+            skew_df = grouped_subset.apply(lambda g: skew(g.drop(columns="Label"), axis=0)).apply(pd.Series)
+
+            # Aggregate patch stats by taking mean across patches for each class
+            agg_stats["Mean"][base_feature] = mean_df.mean(axis=1)
+            agg_stats["Median"][base_feature] = median_df.median(axis=1)
+            agg_stats["Std"][base_feature] = std_df.mean(axis=1)
+            agg_stats["Min"][base_feature] = min_df.min(axis=1)
+            agg_stats["Max"][base_feature] = max_df.max(axis=1)
+            agg_stats["Skew"][base_feature] = skew_df.mean(axis=1)
+
+        for stat_name, stat_df in agg_stats.items():
+            stat_df.index.name = "Class"
+            print(f"\n📊 GLCM Feature {stat_name} by Depth Class:")
             with pd.option_context("display.max_columns", None, "display.precision", 4):
                 display(stat_df)
 
             if save_to_csv:
                 filename = f"{prefix}_{stat_name.lower()}.csv"
                 stat_df.to_csv(filename)
-                print(f"✅ Saved {stat_name} stats to {filename}")
+                print(f"💾 Saved {stat_name} stats to {filename}")
+
+        return agg_stats
 
 
 
