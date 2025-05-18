@@ -95,7 +95,7 @@ class GLCMModel:
 
                 glcm = graycomatrix(region, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
                 features = [graycoprops(glcm, prop).flatten() for prop in
-                            ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM']]
+                            ['contrast', 'homogeneity']]
 
                 entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals = [], [], [], []
                 i_vals, j_vals = np.meshgrid(np.arange(levels), np.arange(levels), indexing='ij')
@@ -340,11 +340,11 @@ class GLCMModel:
             grouped.index = [self.mlb.classes_[int(i)] for i in grouped.index]
 
         # Create and display a summary table for each statistic
-        for stat in stats:
-            stat_table = grouped[[f"{prop}_{stat}" for prop in glcm_properties]]
-            print(f"\n📊 GLCM {stat.upper()} values by class:")
-            with pd.option_context("display.max_columns", None, "display.precision", 4):
-                display(stat_table)
+        # Display full mean summary
+        print("\n📊 GLCM Feature Means by Class:")
+        with pd.option_context("display.max_columns", None, "display.precision", 4):
+            display(grouped)
+
 
         # Similar process for validation data
         print("Extracting GLCM features for validation data...")
@@ -695,41 +695,35 @@ class GLCMModel:
             plt.show()
 
         print("\n📋 GLCM Feature Summary by Class (from Evaluation Set):")
-        eval_feature_matrix = np.array(predictions_data["features"])  # Ensure predict() returns this
+        eval_feature_matrix = np.array(predictions_data["features"])  # from your prediction output
         label_vector = np.array(test_labels_numerical)
 
-        # Define GLCM properties and statistics
         glcm_properties = [
             "contrast", "homogeneity", "energy",
             "correlation", "entropy", "max_prob",
             "cluster_shade", "cluster_prominence"
         ]
-        stats = ["mean", "median", "std", "min", "max", "skew"]
 
         num_glcm_props = len(glcm_properties)
-        num_regions = eval_feature_matrix.shape[1] // num_glcm_props  # e.g., 10 regions (ROI + patches)
+        num_regions = eval_feature_matrix.shape[1] // num_glcm_props
 
-        # Rename columns to match "property_stat" pattern
-        # Dynamically create feature column names to match actual number of features
-        feature_columns = [f"f{i}" for i in range(eval_feature_matrix.shape[1])]
+        # Generate descriptive feature column names like contrast_region1, homogeneity_region1, ...
+        feature_columns = []
+        for region_idx in range(num_regions):
+            for prop in glcm_properties:
+                feature_columns.append(f"{prop}_region{region_idx+1}")
+
         df_features = pd.DataFrame(eval_feature_matrix, columns=feature_columns)
         df_features["label"] = label_vector
 
-
-        # Group by label and compute mean for each feature column
         grouped = df_features.groupby("label").mean()
 
-        # Replace numeric labels with class names if mlb is defined
         if hasattr(self, "mlb") and self.mlb:
             grouped.index = [self.mlb.classes_[int(i)] for i in grouped.index]
 
-        # Display separate tables for each statistic
-        for stat in stats:
-            stat_table = grouped[[f"{prop}_{stat}" for prop in glcm_properties]]
-            print(f"\n📊 GLCM {stat.upper()} values by class:")
-            with pd.option_context("display.max_columns", None, "display.precision", 4):
-                display(stat_table)
-
+        print("\n📊 GLCM Feature Means by Class:")
+        with pd.option_context("display.max_columns", None, "display.precision", 4):
+            display(grouped)
 
         # Return accuracy, report, and predictions
         return accuracy, report, predictions
