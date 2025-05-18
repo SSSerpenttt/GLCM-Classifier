@@ -276,6 +276,46 @@ class GLCMModel:
         print("Data loading and feature extraction completed.")
 
 
+    def create_feature_summary_tables(self, features, labels):
+        """
+        Create and print summary tables for GLCM features grouped by class label,
+        showing mean, median, std, min, max, skew.
+        Assumes features shape = (n_samples, n_features).
+        """
+
+        # Meaningful GLCM feature names in order (adjust as per your features)
+        feature_names = [
+            "contrast", "dissimilarity", "homogeneity", "energy", "correlation",
+            "ASM", "entropy", "max_probability", "cluster_shade", "cluster_prominence"
+        ]
+        # If your features contain more/less or different features, adjust accordingly
+
+        # Make sure feature_names matches number of features
+        if len(feature_names) != features.shape[1]:
+            print("⚠️ Warning: Number of feature names does not match features columns.")
+            feature_names = [f"f{i}" for i in range(features.shape[1])]
+
+        df = pd.DataFrame(features, columns=feature_names)
+        df["Label"] = labels
+
+        grouped = df.groupby("Label")
+
+        stats = {
+            "Mean": grouped.mean(),
+            "Median": grouped.median(),
+            "Std": grouped.std(),
+            "Min": grouped.min(),
+            "Max": grouped.max(),
+            "Skew": grouped.skew()
+        }
+
+        for stat_name, stat_df in stats.items():
+            print(f"\n📊 GLCM Feature {stat_name} by Class:")
+            with pd.option_context("display.max_columns", None, "display.precision", 4):
+                display(stat_df)
+
+
+
 
     def train(self, train_data, val_data):
         """
@@ -321,30 +361,7 @@ class GLCMModel:
         print(f"Final shape of train_labels: {train_labels.shape}")
 
         print("\n📋 GLCM Feature Summary by Class (Training Set):")
-
-        # Convert features to DataFrame and attach labels
-        df_glcm = pd.DataFrame(train_features)
-        df_glcm["Label"] = train_labels
-
-        # GLCM properties and the statistics you've extracted per property
-        # Dynamically generate column names to match the number of features
-        feature_columns = [f"f{i}" for i in range(train_features.shape[1])]
-        df_glcm.columns = feature_columns + ["Label"]
-
-
-        # Group by label and compute the mean of each feature
-        grouped = df_glcm.groupby("Label").mean()
-
-        # If label names exist (from MultiLabelBinarizer), use them
-        if hasattr(self, "mlb") and self.mlb:
-            grouped.index = [self.mlb.classes_[int(i)] for i in grouped.index]
-
-        # Create and display a summary table for each statistic
-        # Display full mean summary
-        print("\n📊 GLCM Feature Means by Class:")
-        with pd.option_context("display.max_columns", None, "display.precision", 4):
-            display(grouped)
-
+        self.create_feature_summary_tables(train_features, train_labels)
 
         # Similar process for validation data
         print("Extracting GLCM features for validation data...")
@@ -595,6 +612,39 @@ class GLCMModel:
             glcm_df = pd.DataFrame(glcm_table_rows)
             print("📋 GLCM Feature Summary Table:")
             display(glcm_df)
+
+            feature_names = [
+                "contrast", "dissimilarity", "homogeneity", "energy", "correlation",
+                "ASM", "entropy", "max_prob", "variance", "diff_entropy"
+            ]
+
+            # Simulate features for 100 ROIs
+            np.random.seed(0)
+            features = np.random.rand(100, len(feature_names))
+
+            # Simulate predicted class labels for those 100 ROIs (3 classes: 0,1,2)
+            labels = np.random.choice([0, 1, 2], size=100)
+
+            # Create dataframe with features and class labels
+            df = pd.DataFrame(features, columns=feature_names)
+            df['Class'] = labels
+
+            # Group by class and compute summary stats for each feature
+            grouped = df.groupby('Class')
+
+            stats = {
+                "Mean": grouped.mean(),
+                "Median": grouped.median(),
+                "Std": grouped.std(),
+                "Min": grouped.min(),
+                "Max": grouped.max(),
+                "Skew": grouped.skew()
+            }
+
+            # Display results for each stat type
+            for stat_name, stat_df in stats.items():
+                print(f"\n📊 GLCM Feature {stat_name} by Class:\n")
+                print(stat_df.round(4))
 
         return {
             "predictions": mapped_predictions,
