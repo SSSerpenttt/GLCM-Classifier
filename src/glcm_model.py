@@ -276,43 +276,67 @@ class GLCMModel:
         print("Data loading and feature extraction completed.")
 
 
-    def create_feature_summary_tables(self, features, labels):
+    def create_feature_summary_tables(self, features, labels, save_to_csv=False, prefix="GLCM_Stats"):
         """
-        Create and print summary tables for GLCM features grouped by class label,
-        showing mean, median, std, min, max, skew.
+        Create and print summary tables for GLCM features grouped by class label.
+        Supports dynamically generated features, showing mean, median, std, min, max, skew.
         Assumes features shape = (n_samples, n_features).
+        
+        Parameters:
+            features (np.array): Feature matrix of shape (n_samples, n_features)
+            labels (list or array): Class labels for each sample
+            save_to_csv (bool): Whether to save the summary stats as CSV files
+            prefix (str): File prefix to use when saving CSVs
         """
+        import pandas as pd
+        from scipy.stats import skew
+        from IPython.display import display
 
-        # Meaningful GLCM feature names in order (adjust as per your features)
-        feature_names = [
-            "contrast", "dissimilarity", "homogeneity", "energy", "correlation",
-            "ASM", "entropy", "max_probability", "cluster_shade", "cluster_prominence"
+        # Try generating feature names dynamically
+        if features.ndim != 2:
+            raise ValueError("Features must be a 2D array.")
+
+        num_features = features.shape[1]
+        base_feature_names = [
+            "contrast", "homogeneity", "entropy", "max_prob",
+            "variance", "diff_entropy"
         ]
-        # If your features contain more/less or different features, adjust accordingly
 
-        # Make sure feature_names matches number of features
-        if len(feature_names) != features.shape[1]:
-            print("⚠️ Warning: Number of feature names does not match features columns.")
-            feature_names = [f"f{i}" for i in range(features.shape[1])]
+        num_base_features = len(base_feature_names)
+        if num_features % num_base_features != 0:
+            print("⚠️ Feature count not cleanly divisible by base features. Using generic f0...fn names.")
+            feature_names = [f"f{i}" for i in range(num_features)]
+        else:
+            num_sets = num_features // num_base_features
+            feature_names = []
+            for i in range(num_sets):
+                feature_names += [f"{base}_{i}" for base in base_feature_names]
 
+        # Create dataframe and group
         df = pd.DataFrame(features, columns=feature_names)
         df["Label"] = labels
-
         grouped = df.groupby("Label")
 
+        # Compute statistics
         stats = {
             "Mean": grouped.mean(),
             "Median": grouped.median(),
             "Std": grouped.std(),
             "Min": grouped.min(),
             "Max": grouped.max(),
-            "Skew": grouped.skew()
+            "Skew": grouped.apply(lambda g: skew(g.drop(columns="Label"), axis=0)).apply(pd.Series)
         }
 
         for stat_name, stat_df in stats.items():
             print(f"\n📊 GLCM Feature {stat_name} by Class:")
             with pd.option_context("display.max_columns", None, "display.precision", 4):
                 display(stat_df)
+
+            if save_to_csv:
+                filename = f"{prefix}_{stat_name.lower()}.csv"
+                stat_df.to_csv(filename)
+                print(f"✅ Saved {stat_name} stats to {filename}")
+
 
 
 
