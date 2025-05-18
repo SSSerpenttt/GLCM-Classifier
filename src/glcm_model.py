@@ -327,20 +327,10 @@ class GLCMModel:
         df_glcm["Label"] = train_labels
 
         # GLCM properties and the statistics you've extracted per property
-        glcm_properties = [
-            "contrast", "homogeneity", "energy",
-            "correlation", "entropy", "max_prob",
-            "cluster_shade", "cluster_prominence"
-        ]
-        stats = ["mean", "median", "std", "min", "max", "skew"]
+        # Dynamically generate column names to match the number of features
+        feature_columns = [f"f{i}" for i in range(train_features.shape[1])]
+        df_glcm.columns = feature_columns + ["Label"]
 
-        # Rename the feature columns in the DataFrame
-        column_names = [
-            f"{prop}_{stat}"
-            for prop in glcm_properties
-            for stat in stats
-        ]
-        df_glcm.columns = column_names + ["Label"]
 
         # Group by label and compute the mean of each feature
         grouped = df_glcm.groupby("Label").mean()
@@ -555,10 +545,6 @@ class GLCMModel:
                 "entropy", "max_prob", "variance", "diff_entropy"
             ]
 
-            num_metrics = len(metric_names)
-            num_segments = 10  # 1 ROI + 9 patches
-            values_per_metric = input_features.shape[1] // (num_metrics * num_segments)
-
             sampled_data = list(zip(image_rois, predicted_labels))
             sampled_features = [input_features[i] for i, (img_i, _) in enumerate(valid_roi_indices) if img_i == img_idx]
 
@@ -581,11 +567,25 @@ class GLCMModel:
 
                 if i < len(sampled_features):
                     full_vector = sampled_features[i]
-                    reshaped = full_vector.reshape(num_metrics, num_segments, values_per_metric)
-                    means = reshaped.mean(axis=(1, 2))  # Mean over all segments and angles/distances
+                    total_metrics = len(metric_names)
+                    # Auto-infer number of segments
+                    num_segments = 1
+                    for s in range(1, 20):
+                        if (full_vector.shape[0] % (total_metrics * s)) == 0:
+                            num_segments = s
+                            break
 
-                    for j, metric in enumerate(metric_names):
-                        glcm_row[f"{metric}_mean"] = round(means[j], 4)
+                    try:
+                        values_per_metric = full_vector.shape[0] // (total_metrics * num_segments)
+                        reshaped = full_vector.reshape(total_metrics, num_segments, values_per_metric)
+                        means = reshaped.mean(axis=(1, 2))  # Mean over all segments and dimensions
+
+                        for j, metric in enumerate(metric_names):
+                            glcm_row[f"{metric}_mean"] = round(means[j], 4)
+                    except Exception as e:
+                        print(f"⚠️ Warning while reshaping GLCM vector: {e}")
+                        for metric in metric_names:
+                            glcm_row[f"{metric}_mean"] = "N/A"
 
                 glcm_table_rows.append(glcm_row)
 
@@ -603,6 +603,7 @@ class GLCMModel:
             "valid_roi_indices": valid_roi_indices,
             "features": input_features
         }
+
 
 
 
@@ -709,13 +710,11 @@ class GLCMModel:
         num_regions = eval_feature_matrix.shape[1] // num_glcm_props  # e.g., 10 regions (ROI + patches)
 
         # Rename columns to match "property_stat" pattern
-        column_names = [
-            f"{prop}_{stat}"
-            for prop in glcm_properties
-            for stat in stats
-        ]
-        df_features = pd.DataFrame(eval_feature_matrix, columns=column_names)
+        # Dynamically create feature column names to match actual number of features
+        feature_columns = [f"f{i}" for i in range(eval_feature_matrix.shape[1])]
+        df_features = pd.DataFrame(eval_feature_matrix, columns=feature_columns)
         df_features["label"] = label_vector
+
 
         # Group by label and compute mean for each feature column
         grouped = df_features.groupby("label").mean()
