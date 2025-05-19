@@ -619,18 +619,12 @@ class GLCMModel:
                     try:
                         total_metrics = len(metric_names)
 
-                        num_segments = None
-                        for s in range(1, 20):
-                            if feat.shape[0] % (total_metrics * s) == 0:
-                                num_segments = s
-                                break
+                        num_segments = feat.shape[0] // total_metrics
+                        if feat.shape[0] % total_metrics != 0:
+                            raise ValueError("GLCM feature length is not divisible by number of metrics.")
 
-                        if num_segments is None:
-                            raise ValueError("Unable to infer number of segments.")
-
-                        values_per_metric = feat.shape[0] // (total_metrics * num_segments)
-                        reshaped = feat.reshape(num_segments, total_metrics, values_per_metric)
-                        means = reshaped.mean(axis=(0, 2))  # shape: (metrics,)
+                        reshaped = feat.reshape(num_segments, total_metrics)
+                        means = reshaped.mean(axis=0)  # shape: (10,)
 
                         for j, metric in enumerate(metric_names):
                             glcm_row[f"{metric}_mean"] = round(means[j], 4)
