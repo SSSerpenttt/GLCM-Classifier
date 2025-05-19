@@ -422,6 +422,9 @@ class GLCMModel:
         print(f"Shape of val_features: {val_features.shape}")
         print(f"Shape of val_labels: {val_labels.shape}")
 
+        print("\n📋 GLCM Feature Summary by Class (Validation Set):")
+        self.create_feature_summary_tables(train_features, train_labels)
+
         print("Starting training...")
         
         classifier = self.classifier_type.lower()
@@ -753,10 +756,13 @@ class GLCMModel:
             plt.tight_layout()
             plt.show()
 
+        features = np.array(predictions_data["features"])
+        labels = np.array(test_labels_numerical)
+
         print("\n📋 GLCM Feature Summary by Class (from Evaluation Set):")
         self.create_feature_summary_tables(
-            features=np.array(predictions_data["features"]),
-            labels=np.array(test_labels_numerical),
+            features,
+            labels,
             save_to_csv=False,
             prefix=f"GLCM_Stats_{self.classifier_type}"
         )
