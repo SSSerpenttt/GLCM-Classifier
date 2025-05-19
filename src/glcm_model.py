@@ -596,28 +596,6 @@ class GLCMModel:
             axs[1].axis("off")
 
             glcm_table_rows = []
-            metric_names = [
-                "contrast", "dissimilarity", "homogeneity", "energy", "correlation", "ASM",
-                "entropy", "max_prob", "variance", "diff_entropy"
-            ]
-
-            num_metrics = len(metric_names)
-            num_segments = 10  # 1 ROI + 9 patches summary
-
-            total_length = input_features.shape[1]
-            # Compute values_per_metric by integer division
-            values_per_metric = total_length // (num_metrics * num_segments)
-
-            expected_length = num_metrics * num_segments * values_per_metric
-            if total_length != expected_length:
-                print(f"⚠️ Warning: Feature length {total_length} does not match expected shape "
-                    f"({num_metrics}*{num_segments}*{values_per_metric}={expected_length}).")
-
-                # Try to guess new dimensions or skip reshaping
-                # For safety, skip reshaping if mismatch
-                reshape_possible = False
-            else:
-                reshape_possible = True
 
             sampled_data = list(zip(image_rois, predicted_labels))
             sampled_features = [input_features[i] for i, (img_i, _) in enumerate(valid_roi_indices) if img_i == img_idx]
@@ -641,15 +619,36 @@ class GLCMModel:
 
                 if i < len(sampled_features):
                     full_vector = sampled_features[i]
-                    if reshape_possible:
-                        reshaped = full_vector.reshape(num_metrics, num_segments, values_per_metric)
-                        means = reshaped.mean(axis=(1, 2))  # Mean over all segments and angles/distances
+                    full_length = full_vector.shape[0]
 
-                        for j, metric in enumerate(metric_names):
-                            glcm_row[f"{metric}_mean"] = round(means[j], 4)
-                    else:
-                        # If reshaping not possible, fallback: show overall mean
+                    num_stats = 6  # mean, median, std, min, max, skew
+                    roi_feature_len = full_length // (num_stats + 1)
+
+                    if full_length != roi_feature_len * (num_stats + 1):
+                        print(f"⚠️ Feature split mismatch. Total: {full_length}, expected: {(num_stats + 1) * roi_feature_len}")
                         glcm_row["feature_mean"] = round(full_vector.mean(), 4)
+                    else:
+                        roi_features = full_vector[:roi_feature_len]
+                        stats_block = full_vector[roi_feature_len:]
+
+                        stats_matrix = stats_block.reshape(num_stats, roi_feature_len)
+                        full_stack = np.vstack([roi_features, stats_matrix])
+                        mean_metrics = full_stack.mean(axis=0)
+
+                        # Group by GLCM feature names
+                        base_feature_names = ["contrast", "homogeneity", "entropy", "max_prob", "variance", "diff_entropy"]
+                        num_base = len(base_feature_names)
+
+                        if roi_feature_len % num_base != 0:
+                            print("⚠️ Cannot group features cleanly into GLCM metrics. Showing raw indices instead.")
+                            for j in range(mean_metrics.shape[0]):
+                                glcm_row[f"feature_{j}_mean"] = round(mean_metrics[j], 4)
+                        else:
+                            values_per_metric = roi_feature_len // num_base
+                            for i, name in enumerate(base_feature_names):
+                                start = i * values_per_metric
+                                end = start + values_per_metric
+                                glcm_row[f"{name}_mean"] = round(mean_metrics[start:end].mean(), 4)
 
                 glcm_table_rows.append(glcm_row)
 
@@ -667,6 +666,7 @@ class GLCMModel:
             "valid_roi_indices": valid_roi_indices,
             "features": input_features
         }
+
 
 
 
