@@ -602,8 +602,12 @@ class GLCMModel:
             ]
 
             num_metrics = len(metric_names)
-            num_segments = 10  # 1 ROI + 9 patches
+            num_segments = 10  # 1 ROI + 9 patches summary
             values_per_metric = input_features.shape[1] // (num_metrics * num_segments)
+
+            if input_features.shape[1] != num_metrics * num_segments * values_per_metric:
+                print(f"Warning: Feature length {input_features.shape[1]} does not match expected shape "
+                    f"({num_metrics}*{num_segments}*{values_per_metric}={num_metrics * num_segments * values_per_metric}).")
 
             sampled_data = list(zip(image_rois, predicted_labels))
             sampled_features = [input_features[i] for i, (img_i, _) in enumerate(valid_roi_indices) if img_i == img_idx]
