@@ -1,7 +1,18 @@
 import numpy as np
 import lightgbm as lgb
 from lightgbm import LGBMClassifier, early_stopping, log_evaluation
-from sklearn.metrics import average_precision_score, accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay, log_loss, roc_auc_score
+from sklearn.metrics import (
+    average_precision_score,
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    log_loss,
+    roc_auc_score,
+    roc_curve,
+    auc,
+    precision_recall_curve
+)
 from sklearn.preprocessing import MultiLabelBinarizer
 from skimage.feature import graycomatrix, graycoprops
 import cv2  # For image processing
@@ -678,28 +689,22 @@ class GLCMModel:
     def evaluate(self, images, rois, labels):
         """
         Evaluate the model's performance on the specified images and ROIs.
-        Displays example predictions with visual comparisons.
+        Displays predictions, confusion matrix, ROC, PR curve, and PCA projection.
         Returns accuracy, classification report, and predictions.
-
-        Args:
-            images (list or np.array): List or array of grayscale images to evaluate.
-            rois (list): List of ROIs for each image.
-            labels (list): Ground truth labels for the ROIs.
         """
         predictions_data = self.predict(images, rois)
         predictions = predictions_data["predictions"]
-
-        # Align ground truth labels with valid ROIs and preprocess them
         valid_roi_indices = predictions_data["valid_roi_indices"]
-        original_gt_labels = [labels[img_idx][roi_idx] for img_idx, roi_idx in valid_roi_indices]
+        features = np.array(predictions_data["features"])
 
+        # Prepare ground truth labels
+        original_gt_labels = [labels[img_idx][roi_idx] for img_idx, roi_idx in valid_roi_indices]
         test_labels_numerical = self.preprocess_labels(original_gt_labels)
 
-        # Flatten predictions for evaluation
-        flat_predictions = [pred for preds in predictions for pred in preds]  # For metrics
-        reshaped_predictions = predictions  # Already per-image from predict()
+        # Flatten predictions
+        flat_predictions = [pred for preds in predictions for pred in preds]
 
-        # Calculate accuracy
+        # Accuracy
         accuracy = accuracy_score(test_labels_numerical, flat_predictions)
         print(f"Test Accuracy: {accuracy:.2f}")
 
@@ -712,32 +717,71 @@ class GLCMModel:
         cm = confusion_matrix(test_labels_numerical, flat_predictions)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.mlb.classes_)
         disp.plot(cmap="Blues", xticks_rotation="vertical")
-        plt.title("Confusion Matrix for GLCM model ({self.classifier_type} classifier)")
+        plt.title(f"Confusion Matrix for GLCM model ({self.classifier_type} classifier)")
         plt.show()
 
-        # Calculate mAP
+        # ROC Curve (binary only)
+        if len(self.mlb.classes_) == 2:
+            fpr, tpr, _ = roc_curve(test_labels_numerical, flat_predictions)
+            roc_auc = auc(fpr, tpr)
+            plt.figure(figsize=(6, 6))
+            plt.plot(fpr, tpr, label=f'AUC = {roc_auc:.2f}', color='darkorange')
+            plt.plot([0, 1], [0, 1], 'k--', lw=1)
+            plt.xlabel("False Positive Rate")
+            plt.ylabel("True Positive Rate")
+            plt.title(f"ROC Curve ({self.classifier_type})")
+            plt.legend(loc="lower right")
+            plt.grid(True)
+            plt.show()
+
+        # Precision-Recall Curve
+        if len(self.mlb.classes_) == 2:
+            precision, recall, _ = precision_recall_curve(test_labels_numerical, flat_predictions)
+            plt.figure(figsize=(6, 6))
+            plt.plot(recall, precision, marker='.', color='purple')
+            plt.xlabel("Recall")
+            plt.ylabel("Precision")
+            plt.title(f"Precision-Recall Curve ({self.classifier_type})")
+            plt.grid(True)
+            plt.show()
+
+        # Mean Average Precision
         average_precision = average_precision_score(test_labels_numerical, flat_predictions)
         print(f"Mean Average Precision (mAP): {average_precision:.2f}")
-        
-        for img_idx in random.sample(range(len(images)), 5):
+
+        # PCA Visualization
+        from sklearn.decomposition import PCA
+        labels_array = np.array(test_labels_numerical)
+        pca = PCA(n_components=2)
+        reduced = pca.fit_transform(features)
+
+        plt.figure(figsize=(8, 6))
+        for class_idx, class_name in enumerate(self.mlb.classes_):
+            plt.scatter(reduced[labels_array == class_idx, 0], reduced[labels_array == class_idx, 1], alpha=0.6, label=class_name)
+        plt.xlabel("PCA Component 1")
+        plt.ylabel("PCA Component 2")
+        plt.title(f"PCA of GLCM Features ({self.classifier_type})")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+        # Visual comparison per image
+        for img_idx in random.sample(range(len(images)), min(5, len(images))):
             print(f"Visualizing predictions vs ground truth for image {img_idx + 1}...")
             image = images[img_idx]
             image_rois = rois[img_idx]
             ground_truth_labels_strings = labels[img_idx]
-            predicted_labels_numerical = reshaped_predictions[img_idx]
+            predicted_labels_numerical = predictions[img_idx]
 
             print(f"ROIs for image {img_idx}: {image_rois}")
             print(f"GT labels: {ground_truth_labels_strings}")
             print(f"Predictions: {predicted_labels_numerical}")
 
-            # Create a figure with 2 subplots: original + annotated
             fig, axs = plt.subplots(1, 2, figsize=(16, 8))
-
-            axs[0].imshow(image)
+            axs[0].imshow(image, cmap="gray")
             axs[0].set_title("Original Image")
             axs[0].axis("off")
 
-            # Plot the image with ROIs and labels
             axs[1].imshow(image, cmap="gray")
             axs[1].set_title(f"Image {img_idx + 1}: Predictions vs Ground Truth")
 
@@ -754,25 +798,21 @@ class GLCMModel:
                     color=color,
                     fontsize=8,
                     bbox=dict(facecolor="white", alpha=0.5, edgecolor="none")
-              )
+                )
             axs[1].axis("off")
-
             plt.tight_layout()
             plt.show()
-
-        features = np.array(predictions_data["features"])
-        labels = np.array(test_labels_numerical)
 
         print("\n📋 GLCM Feature Summary by Class (from Evaluation Set):")
         self.create_feature_summary_tables(
             features,
-            labels,
+            test_labels_numerical,
             save_to_csv=False,
             prefix=f"GLCM_Stats_{self.classifier_type}"
         )
 
-        # Return accuracy, report, and predictions
         return accuracy, report, predictions
+
 
 
 
