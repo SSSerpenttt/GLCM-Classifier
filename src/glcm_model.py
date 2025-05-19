@@ -276,6 +276,8 @@ class GLCMModel:
         print("Data loading and feature extraction completed.")
 
 
+
+
     def create_feature_summary_tables(self, features, labels, save_to_csv=False, prefix="GLCM_Stats"):
         """
         Create summary tables for each statistic with:
@@ -563,23 +565,23 @@ class GLCMModel:
         sampled_image_indices = random.sample(range(len(images)), min(5, len(images)))
 
         for img_idx in sampled_image_indices:
-            print(f"\n📷 Predictions for Image {img_idx + 1}:")
+            # Inside for img_idx in sampled_image_indices:
             image = images[img_idx]
             image_rois = rois[img_idx]
             predicted_labels = mapped_predictions[img_idx]
 
-            if not predicted_labels:
-                print("⚠️ No valid ROIs were processed for this image.")
-                continue
+            # Retrieve features for this image by matching both image and ROI indices
+            roi_feature_map = {
+                roi_idx: feat
+                for (img_i, roi_idx), feat in zip(valid_roi_indices, input_features)
+                if img_i == img_idx
+            }
 
-            print(f"ROIs: {image_rois}")
-            print(f"Predicted labels (numeric): {predicted_labels}")
-            if self.mlb:
-                label_names = [self.mlb.classes_[p] for p in predicted_labels]
-                print(f"Predicted labels (named): {label_names}")
-            else:
-                label_names = [str(p) for p in predicted_labels]
-                print("🔍 Note: MultiLabelBinarizer not initialized yet, showing numeric labels only.")
+            glcm_table_rows = []
+            metric_names = [
+                "contrast", "dissimilarity", "homogeneity", "energy", "correlation", "ASM",
+                "entropy", "max_prob", "variance", "diff_entropy"
+            ]
 
             fig, axs = plt.subplots(1, 2, figsize=(16, 8))
             axs[0].imshow(image, cmap="gray")
@@ -590,18 +592,10 @@ class GLCMModel:
             axs[1].set_title(f"Predictions for Image {img_idx + 1}")
             axs[1].axis("off")
 
-            glcm_table_rows = []
-            metric_names = [
-                "contrast", "dissimilarity", "homogeneity", "energy", "correlation", "ASM",
-                "entropy", "max_prob", "variance", "diff_entropy"
-            ]
-
-            sampled_data = list(zip(image_rois, predicted_labels))
-            sampled_features = [input_features[i] for i, (img_i, _) in enumerate(valid_roi_indices) if img_i == img_idx]
-
-            for i, (roi, pred_label) in enumerate(sampled_data[:5]):
+            for i, (roi, pred_label) in enumerate(zip(image_rois, predicted_labels)):
                 x, y, w, h = map(int, roi)
                 label_name = self.mlb.classes_[pred_label] if self.mlb else str(pred_label)
+
                 axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor="blue", facecolor="none", linewidth=1.5))
                 axs[1].text(
                     x, y - 5,
@@ -616,29 +610,38 @@ class GLCMModel:
                     "Predicted Label": label_name
                 }
 
-                if i < len(sampled_features):
-                    full_vector = sampled_features[i]
-                    total_metrics = len(metric_names)
-                    # Auto-infer number of segments
-                    num_segments = 1
-                    for s in range(1, 20):
-                        if (full_vector.shape[0] % (total_metrics * s)) == 0:
-                            num_segments = s
-                            break
-
+                # Get features using current ROI index
+                feat = roi_feature_map.get(i, None)
+                if feat is not None:
                     try:
-                        values_per_metric = full_vector.shape[0] // (total_metrics * num_segments)
-                        reshaped = full_vector.reshape(total_metrics, num_segments, values_per_metric)
-                        means = reshaped.mean(axis=(1, 2))  # Mean over all segments and dimensions
+                        total_metrics = len(metric_names)
+
+                        num_segments = None
+                        for s in range(1, 20):
+                            if feat.shape[0] % (total_metrics * s) == 0:
+                                num_segments = s
+                                break
+
+                        if num_segments is None:
+                            raise ValueError("Unable to infer number of segments.")
+
+                        values_per_metric = feat.shape[0] // (total_metrics * num_segments)
+                        reshaped = feat.reshape(num_segments, total_metrics, values_per_metric)
+                        means = reshaped.mean(axis=(0, 2))  # shape: (metrics,)
 
                         for j, metric in enumerate(metric_names):
                             glcm_row[f"{metric}_mean"] = round(means[j], 4)
+
                     except Exception as e:
-                        print(f"⚠️ Warning while reshaping GLCM vector: {e}")
+                        print(f"⚠️ Error reshaping GLCM feature: {e}")
                         for metric in metric_names:
                             glcm_row[f"{metric}_mean"] = "N/A"
+                else:
+                    for metric in metric_names:
+                        glcm_row[f"{metric}_mean"] = "N/A"
 
                 glcm_table_rows.append(glcm_row)
+
 
             plt.tight_layout()
             plt.show()
@@ -651,34 +654,6 @@ class GLCMModel:
                 "contrast", "dissimilarity", "homogeneity", "energy", "correlation",
                 "ASM", "entropy", "max_prob", "variance", "diff_entropy"
             ]
-
-            # Simulate features for 100 ROIs
-            np.random.seed(0)
-            features = np.random.rand(100, len(feature_names))
-
-            # Simulate predicted class labels for those 100 ROIs (3 classes: 0,1,2)
-            labels = np.random.choice([0, 1, 2], size=100)
-
-            # Create dataframe with features and class labels
-            df = pd.DataFrame(features, columns=feature_names)
-            df['Class'] = labels
-
-            # Group by class and compute summary stats for each feature
-            grouped = df.groupby('Class')
-
-            stats = {
-                "Mean": grouped.mean(),
-                "Median": grouped.median(),
-                "Std": grouped.std(),
-                "Min": grouped.min(),
-                "Max": grouped.max(),
-                "Skew": grouped.skew()
-            }
-
-            # Display results for each stat type
-            for stat_name, stat_df in stats.items():
-                print(f"\n📊 GLCM Feature {stat_name} by Class:\n")
-                print(stat_df.round(4))
 
         return {
             "predictions": mapped_predictions,
@@ -779,35 +754,12 @@ class GLCMModel:
             plt.show()
 
         print("\n📋 GLCM Feature Summary by Class (from Evaluation Set):")
-        eval_feature_matrix = np.array(predictions_data["features"])  # from your prediction output
-        label_vector = np.array(test_labels_numerical)
-
-        glcm_properties = [
-            "contrast", "homogeneity", "energy",
-            "correlation", "entropy", "max_prob",
-            "cluster_shade", "cluster_prominence"
-        ]
-
-        num_glcm_props = len(glcm_properties)
-        num_regions = eval_feature_matrix.shape[1] // num_glcm_props
-
-        # Generate descriptive feature column names like contrast_region1, homogeneity_region1, ...
-        feature_columns = []
-        for region_idx in range(num_regions):
-            for prop in glcm_properties:
-                feature_columns.append(f"{prop}_region{region_idx+1}")
-
-        df_features = pd.DataFrame(eval_feature_matrix, columns=feature_columns)
-        df_features["label"] = label_vector
-
-        grouped = df_features.groupby("label").mean()
-
-        if hasattr(self, "mlb") and self.mlb:
-            grouped.index = [self.mlb.classes_[int(i)] for i in grouped.index]
-
-        print("\n📊 GLCM Feature Means by Class:")
-        with pd.option_context("display.max_columns", None, "display.precision", 4):
-            display(grouped)
+        self.create_feature_summary_tables(
+            features=np.array(predictions_data["features"]),
+            labels=np.array(test_labels_numerical),
+            save_to_csv=False,
+            prefix=f"GLCM_Stats_{self.classifier_type}"
+        )
 
         # Return accuracy, report, and predictions
         return accuracy, report, predictions
