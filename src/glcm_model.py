@@ -603,11 +603,21 @@ class GLCMModel:
 
             num_metrics = len(metric_names)
             num_segments = 10  # 1 ROI + 9 patches summary
-            values_per_metric = input_features.shape[1] // (num_metrics * num_segments)
 
-            if input_features.shape[1] != num_metrics * num_segments * values_per_metric:
-                print(f"Warning: Feature length {input_features.shape[1]} does not match expected shape "
-                    f"({num_metrics}*{num_segments}*{values_per_metric}={num_metrics * num_segments * values_per_metric}).")
+            total_length = input_features.shape[1]
+            # Compute values_per_metric by integer division
+            values_per_metric = total_length // (num_metrics * num_segments)
+
+            expected_length = num_metrics * num_segments * values_per_metric
+            if total_length != expected_length:
+                print(f"⚠️ Warning: Feature length {total_length} does not match expected shape "
+                    f"({num_metrics}*{num_segments}*{values_per_metric}={expected_length}).")
+
+                # Try to guess new dimensions or skip reshaping
+                # For safety, skip reshaping if mismatch
+                reshape_possible = False
+            else:
+                reshape_possible = True
 
             sampled_data = list(zip(image_rois, predicted_labels))
             sampled_features = [input_features[i] for i, (img_i, _) in enumerate(valid_roi_indices) if img_i == img_idx]
@@ -631,11 +641,15 @@ class GLCMModel:
 
                 if i < len(sampled_features):
                     full_vector = sampled_features[i]
-                    reshaped = full_vector.reshape(num_metrics, num_segments, values_per_metric)
-                    means = reshaped.mean(axis=(1, 2))  # Mean over all segments and angles/distances
+                    if reshape_possible:
+                        reshaped = full_vector.reshape(num_metrics, num_segments, values_per_metric)
+                        means = reshaped.mean(axis=(1, 2))  # Mean over all segments and angles/distances
 
-                    for j, metric in enumerate(metric_names):
-                        glcm_row[f"{metric}_mean"] = round(means[j], 4)
+                        for j, metric in enumerate(metric_names):
+                            glcm_row[f"{metric}_mean"] = round(means[j], 4)
+                    else:
+                        # If reshaping not possible, fallback: show overall mean
+                        glcm_row["feature_mean"] = round(full_vector.mean(), 4)
 
                 glcm_table_rows.append(glcm_row)
 
@@ -653,6 +667,7 @@ class GLCMModel:
             "valid_roi_indices": valid_roi_indices,
             "features": input_features
         }
+
 
 
 
