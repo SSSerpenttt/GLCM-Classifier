@@ -567,25 +567,24 @@ class GLCMModel:
 
         sampled_image_indices = random.sample(range(len(images)), min(5, len(images)))
 
+        metric_names = [
+            "contrast", "dissimilarity", "homogeneity", "energy", "correlation",
+            "ASM", "entropy", "max_prob", "variance", "diff_entropy"
+        ]
+
+        summary_rows = []
+
         for img_idx in sampled_image_indices:
-            # Inside for img_idx in sampled_image_indices:
             image = images[img_idx]
             image_rois = rois[img_idx]
             predicted_labels = mapped_predictions[img_idx]
 
-            # Retrieve features for this image by matching both image and ROI indices
             roi_feature_map = {
-                roi_idx: feat
+                (img_i, roi_idx): feat
                 for (img_i, roi_idx), feat in zip(valid_roi_indices, input_features)
-                if img_i == img_idx
             }
 
-            glcm_table_rows = []
-            metric_names = [
-                "contrast", "dissimilarity", "homogeneity", "energy", "correlation", "ASM",
-                "entropy", "max_prob", "variance", "diff_entropy"
-            ]
-
+            # Create plot
             fig, axs = plt.subplots(1, 2, figsize=(16, 8))
             axs[0].imshow(image, cmap="gray")
             axs[0].set_title("Original Image")
@@ -613,18 +612,19 @@ class GLCMModel:
                     "Predicted Label": label_name
                 }
 
-                # Get features using current ROI index
-                feat = roi_feature_map.get(i, None)
+                feat = roi_feature_map.get((img_idx, i), None)
                 if feat is not None:
                     try:
                         total_metrics = len(metric_names)
 
-                        num_segments = feat.shape[0] // total_metrics
                         if feat.shape[0] % total_metrics != 0:
-                            raise ValueError("GLCM feature length is not divisible by number of metrics.")
+                            raise ValueError(
+                                f"GLCM feature length ({feat.shape[0]}) is not divisible by number of metrics ({total_metrics})."
+                            )
 
-                        reshaped = feat.reshape(num_segments, total_metrics)
-                        means = reshaped.mean(axis=0)  # shape: (10,)
+                        num_configs = feat.shape[0] // total_metrics
+                        reshaped = feat.reshape(num_configs, total_metrics)
+                        means = reshaped.mean(axis=0)
 
                         for j, metric in enumerate(metric_names):
                             glcm_row[f"{metric}_mean"] = round(means[j], 4)
@@ -637,20 +637,14 @@ class GLCMModel:
                     for metric in metric_names:
                         glcm_row[f"{metric}_mean"] = "N/A"
 
-                glcm_table_rows.append(glcm_row)
-
+                summary_rows.append(glcm_row)
 
             plt.tight_layout()
             plt.show()
 
-            glcm_df = pd.DataFrame(glcm_table_rows)
-            print("📋 GLCM Feature Summary Table:")
-            display(glcm_df)
-
-            feature_names = [
-                "contrast", "dissimilarity", "homogeneity", "energy", "correlation",
-                "ASM", "entropy", "max_prob", "variance", "diff_entropy"
-            ]
+        summary_df = pd.DataFrame(summary_rows)
+        print("📋 GLCM Feature Summary Table:")
+        print(summary_df.to_string(index=False))
 
         return {
             "predictions": mapped_predictions,
@@ -659,6 +653,7 @@ class GLCMModel:
             "valid_roi_indices": valid_roi_indices,
             "features": input_features
         }
+
 
 
 
