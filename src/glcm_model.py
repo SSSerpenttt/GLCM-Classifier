@@ -567,24 +567,25 @@ class GLCMModel:
 
         sampled_image_indices = random.sample(range(len(images)), min(5, len(images)))
 
-        metric_names = [
-            "contrast", "dissimilarity", "homogeneity", "energy", "correlation",
-            "ASM", "entropy", "max_prob", "variance", "diff_entropy"
-        ]
-
-        summary_rows = []
-
         for img_idx in sampled_image_indices:
+            print(f"\n📷 Predictions for Image {img_idx + 1}:")
             image = images[img_idx]
             image_rois = rois[img_idx]
             predicted_labels = mapped_predictions[img_idx]
 
-            roi_feature_map = {
-                (img_i, roi_idx): feat
-                for (img_i, roi_idx), feat in zip(valid_roi_indices, input_features)
-            }
+            if not predicted_labels:
+                print("⚠️ No valid ROIs were processed for this image.")
+                continue
 
-            # Create plot
+            print(f"ROIs: {image_rois}")
+            print(f"Predicted labels (numeric): {predicted_labels}")
+            if self.mlb:
+                label_names = [self.mlb.classes_[p] for p in predicted_labels]
+                print(f"Predicted labels (named): {label_names}")
+            else:
+                label_names = [str(p) for p in predicted_labels]
+                print("🔍 Note: MultiLabelBinarizer not initialized yet, showing numeric labels only.")
+
             fig, axs = plt.subplots(1, 2, figsize=(16, 8))
             axs[0].imshow(image, cmap="gray")
             axs[0].set_title("Original Image")
@@ -594,10 +595,22 @@ class GLCMModel:
             axs[1].set_title(f"Predictions for Image {img_idx + 1}")
             axs[1].axis("off")
 
-            for i, (roi, pred_label) in enumerate(zip(image_rois, predicted_labels)):
+            glcm_table_rows = []
+            metric_names = [
+                "contrast", "dissimilarity", "homogeneity", "energy", "correlation", "ASM",
+                "entropy", "max_prob", "variance", "diff_entropy"
+            ]
+
+            num_metrics = len(metric_names)
+            num_segments = 10  # 1 ROI + 9 patches
+            values_per_metric = input_features.shape[1] // (num_metrics * num_segments)
+
+            sampled_data = list(zip(image_rois, predicted_labels))
+            sampled_features = [input_features[i] for i, (img_i, _) in enumerate(valid_roi_indices) if img_i == img_idx]
+
+            for i, (roi, pred_label) in enumerate(sampled_data[:5]):
                 x, y, w, h = map(int, roi)
                 label_name = self.mlb.classes_[pred_label] if self.mlb else str(pred_label)
-
                 axs[1].add_patch(plt.Rectangle((x, y), w, h, edgecolor="blue", facecolor="none", linewidth=1.5))
                 axs[1].text(
                     x, y - 5,
@@ -612,39 +625,22 @@ class GLCMModel:
                     "Predicted Label": label_name
                 }
 
-                feat = roi_feature_map.get((img_idx, i), None)
-                if feat is not None:
-                    try:
-                        total_metrics = len(metric_names)
+                if i < len(sampled_features):
+                    full_vector = sampled_features[i]
+                    reshaped = full_vector.reshape(num_metrics, num_segments, values_per_metric)
+                    means = reshaped.mean(axis=(1, 2))  # Mean over all segments and angles/distances
 
-                        if feat.shape[0] % total_metrics != 0:
-                            raise ValueError(
-                                f"GLCM feature length ({feat.shape[0]}) is not divisible by number of metrics ({total_metrics})."
-                            )
+                    for j, metric in enumerate(metric_names):
+                        glcm_row[f"{metric}_mean"] = round(means[j], 4)
 
-                        num_configs = feat.shape[0] // total_metrics
-                        reshaped = feat.reshape(num_configs, total_metrics)
-                        means = reshaped.mean(axis=0)
-
-                        for j, metric in enumerate(metric_names):
-                            glcm_row[f"{metric}_mean"] = round(means[j], 4)
-
-                    except Exception as e:
-                        print(f"⚠️ Error reshaping GLCM feature: {e}")
-                        for metric in metric_names:
-                            glcm_row[f"{metric}_mean"] = "N/A"
-                else:
-                    for metric in metric_names:
-                        glcm_row[f"{metric}_mean"] = "N/A"
-
-                summary_rows.append(glcm_row)
+                glcm_table_rows.append(glcm_row)
 
             plt.tight_layout()
             plt.show()
 
-        summary_df = pd.DataFrame(summary_rows)
-        print("📋 GLCM Feature Summary Table:")
-        print(summary_df.to_string(index=False))
+            glcm_df = pd.DataFrame(glcm_table_rows)
+            print("📋 GLCM Feature Summary Table:")
+            display(glcm_df)
 
         return {
             "predictions": mapped_predictions,
