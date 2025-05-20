@@ -79,13 +79,42 @@ class GLCMModel:
 
     def extract_glcm_features(self, images, rois=None):
         """
-        Extract summarized GLCM features from a list of grayscale images.
-        For each ROI:
-            - Compute full ROI GLCM features.
-            - Divide ROI into 3x3 patches and compute GLCM features.
-            - Compute summary statistics (mean, median, std, min, max, skewness) over patch features.
-            - Concatenate ROI features with the summarized patch features.
+        Efficiently extract GLCM features from ROIs and their patches.
+        Batches the workload and avoids nested parallelism to reduce RAM usage.
         """
+
+        def compute_glcm_features(region):
+            min_dim = min(region.shape[:2])
+            distances = [1, max(1, min_dim // 4)]
+            angles = self.config.angles
+            levels = self.config.levels
+
+            glcm = graycomatrix(region, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
+            props = [graycoprops(glcm, prop).flatten().astype(np.float32) for prop in ['contrast', 'homogeneity']]
+
+            entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals = [], [], [], []
+            i_vals, j_vals = np.meshgrid(np.arange(levels), np.arange(levels), indexing='ij')
+
+            for i in range(glcm.shape[2]):
+                for j in range(glcm.shape[3]):
+                    slice_glcm = glcm[:, :, i, j]
+                    nonzero = slice_glcm[slice_glcm > 0]
+                    entropy_vals.append(-np.sum(nonzero * np.log2(nonzero)))
+                    max_prob_vals.append(np.max(slice_glcm))
+                    mean = np.sum(i_vals * slice_glcm)
+                    variance_vals.append(np.sum(slice_glcm * ((i_vals - mean) ** 2)))
+                    abs_diff = np.abs(i_vals - j_vals)
+                    diff_hist = np.zeros(levels)
+                    np.add.at(diff_hist, abs_diff.ravel(), slice_glcm.ravel())
+                    diff_nonzero = diff_hist[diff_hist > 0]
+                    diff_entropy_vals.append(-np.sum(diff_nonzero * np.log2(diff_nonzero)))
+
+            return np.hstack(props + [
+                np.array(entropy_vals, dtype=np.float32),
+                np.array(max_prob_vals, dtype=np.float32),
+                np.array(variance_vals, dtype=np.float32),
+                np.array(diff_entropy_vals, dtype=np.float32)
+            ])
 
         def process_roi(image, roi, img_idx, roi_idx):
             x, y, w, h = map(int, roi)
@@ -98,38 +127,6 @@ class GLCMModel:
             if cropped_image.size == 0:
                 return None, None
 
-            def compute_glcm_features(region):
-                min_dim = min(region.shape[:2])
-                distances = [1, max(1, min_dim // 4)]
-                angles = self.config.angles
-                levels = self.config.levels
-
-                glcm = graycomatrix(region, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
-                features = [graycoprops(glcm, prop).flatten() for prop in
-                            ['contrast', 'homogeneity']]
-
-                entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals = [], [], [], []
-                i_vals, j_vals = np.meshgrid(np.arange(levels), np.arange(levels), indexing='ij')
-
-                for i in range(glcm.shape[2]):
-                    for j in range(glcm.shape[3]):
-                        slice_glcm = glcm[:, :, i, j]
-                        nonzero = slice_glcm[slice_glcm > 0]
-                        entropy_vals.append(-np.sum(nonzero * np.log2(nonzero)))
-                        max_prob_vals.append(np.max(slice_glcm))
-                        mean = np.sum(i_vals * slice_glcm)
-                        variance_vals.append(np.sum(slice_glcm * ((i_vals - mean) ** 2)))
-                        abs_diff = np.abs(i_vals - j_vals)
-                        diff_hist = np.zeros(levels)
-                        np.add.at(diff_hist, abs_diff.ravel(), slice_glcm.ravel())
-                        diff_nonzero = diff_hist[diff_hist > 0]
-                        diff_entropy_vals.append(-np.sum(diff_nonzero * np.log2(diff_nonzero)))
-
-                del glcm, i_vals, j_vals, abs_diff, diff_hist, diff_nonzero
-                gc.collect()
-
-                return np.hstack(features + [entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals])
-
             cropped_image = self.preprocess_image(cropped_image)
             full_features = compute_glcm_features(cropped_image)
 
@@ -137,43 +134,39 @@ class GLCMModel:
             patch_w = max(1, w // 3)
             patch_h = max(1, h // 3)
 
-            def extract_patch_feature(col, row):
-                px = x + col * patch_w
-                py = y + row * patch_h
-                pw = min(patch_w, image.shape[1] - px)
-                ph = min(patch_h, image.shape[0] - py)
-                patch = image[py:py + ph, px:px + pw]
-                if patch.size == 0 or patch.shape[0] < 2 or patch.shape[1] < 2:
-                    return np.zeros_like(full_features)
-                patch = self.preprocess_image(patch)
-                return compute_glcm_features(patch)
+            patch_features = []
+            for row in range(3):
+                for col in range(3):
+                    px = x + col * patch_w
+                    py = y + row * patch_h
+                    pw = min(patch_w, image.shape[1] - px)
+                    ph = min(patch_h, image.shape[0] - py)
+                    patch = image[py:py + ph, px:px + pw]
+                    if patch.size == 0 or patch.shape[0] < 2 or patch.shape[1] < 2:
+                        patch_features.append(np.zeros_like(full_features, dtype=np.float32))
+                    else:
+                        patch = self.preprocess_image(patch)
+                        patch_features.append(compute_glcm_features(patch))
 
-            patch_features = Parallel(n_jobs=9, backend='threading')(
-                delayed(extract_patch_feature)(col, row)
-                for row in range(3) for col in range(3)
-            )
+            patch_features_arr = np.vstack(patch_features).astype(np.float32)
 
-            patch_features_arr = np.vstack(patch_features)
-
-            # Compute statistical summaries across patches
+            # Summary statistics
             mean_feat = np.mean(patch_features_arr, axis=0)
             median_feat = np.median(patch_features_arr, axis=0)
             std_feat = np.std(patch_features_arr, axis=0)
             min_feat = np.min(patch_features_arr, axis=0)
             max_feat = np.max(patch_features_arr, axis=0)
-            skew_feat = scipy.stats.skew(patch_features_arr, axis=0)
-            skew_feat = np.nan_to_num(skew_feat, nan=0.0)
+            skew_feat = np.zeros_like(mean_feat, dtype=np.float32)
+            if not np.allclose(patch_features_arr, patch_features_arr[0]):
+                skew_feat = scipy.stats.skew(patch_features_arr, axis=0, nan_policy='omit')
+                skew_feat = np.nan_to_num(skew_feat, nan=0.0).astype(np.float32)
 
-            # Combine summary stats and full ROI features
             summary_stats = np.hstack([mean_feat, median_feat, std_feat, min_feat, max_feat, skew_feat])
-            roi_features = np.hstack([full_features, summary_stats])
-
-            del cropped_image, patch_features, full_features, patch_features_arr
-            gc.collect()
+            roi_features = np.hstack([full_features, summary_stats]).astype(np.float32)
 
             return roi_features, (img_idx, roi_idx)
 
-        # Create tasks
+        # --- Create ROI Tasks ---
         tasks = [
             (image, roi, img_idx, roi_idx)
             for img_idx, image in enumerate(images)
@@ -181,22 +174,26 @@ class GLCMModel:
             for roi_idx, roi in enumerate(rois[img_idx])
         ]
 
-        # Process in parallel
-        results = Parallel(n_jobs=4)(delayed(process_roi)(img, roi, i, j)
-                                    for img, roi, i, j in tasks)
+        def batch(iterable, n=100):
+            for i in range(0, len(iterable), n):
+                yield iterable[i:i + n]
 
-        # Collect results
         features = []
         valid_roi_indices = []
-        for feature, valid_index in results:
-            if feature is not None:
-                features.append(feature)
-                valid_roi_indices.append(valid_index)
+        for task_batch in batch(tasks, n=100):  # Adjust batch size if needed
+            results = Parallel(n_jobs=4, backend='loky')(
+                delayed(process_roi)(img, roi, i, j)
+                for img, roi, i, j in task_batch
+            )
+            for feature, valid_index in results:
+                if feature is not None:
+                    features.append(feature)
+                    valid_roi_indices.append(valid_index)
 
-        del results, tasks
-        gc.collect()
+            gc.collect()  # Helps reduce memory usage after each batch
 
-        return np.array(features), valid_roi_indices
+        return np.array(features, dtype=np.float32), valid_roi_indices
+
 
 
 
