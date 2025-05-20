@@ -298,6 +298,7 @@ class GLCMModel:
         import pandas as pd
         from scipy.stats import skew
         from IPython.display import display
+        import gc
 
         if features.ndim != 2:
             raise ValueError("Features must be a 2D array.")
@@ -322,30 +323,39 @@ class GLCMModel:
         grouped = df.groupby("Label")
 
         # Initialize dict to store aggregated stats per feature
-        agg_stats = {stat: pd.DataFrame(index=grouped.groups.keys(), columns=base_feature_names) for stat in ["Mean", "Median", "Std", "Min", "Max", "Skew"]}
+        agg_stats = {
+            stat: pd.DataFrame(index=grouped.groups.keys(), columns=base_feature_names)
+            for stat in ["Mean", "Median", "Std", "Min", "Max", "Skew"]
+        }
 
         for base_feature in base_feature_names:
-            # All columns for this feature (all patches)
             related_cols = [col for col in df.columns if col.startswith(base_feature)]
             subset = df[related_cols + ["Label"]]
-
             grouped_subset = subset.groupby("Label")
 
-            # Compute all stats per patch per class
             mean_df = grouped_subset.mean()
             median_df = grouped_subset.median()
             std_df = grouped_subset.std()
             min_df = grouped_subset.min()
             max_df = grouped_subset.max()
+
+            # Skew may produce NaNs; handled as needed
             skew_df = grouped_subset.apply(lambda g: skew(g.drop(columns="Label"), axis=0)).apply(pd.Series)
 
-            # Aggregate patch stats by taking mean across patches for each class
             agg_stats["Mean"][base_feature] = mean_df.mean(axis=1)
             agg_stats["Median"][base_feature] = median_df.median(axis=1)
             agg_stats["Std"][base_feature] = std_df.mean(axis=1)
             agg_stats["Min"][base_feature] = min_df.min(axis=1)
             agg_stats["Max"][base_feature] = max_df.max(axis=1)
             agg_stats["Skew"][base_feature] = skew_df.mean(axis=1)
+
+            # Explicit garbage collection to free memory
+            del related_cols, subset, grouped_subset
+            del mean_df, median_df, std_df, min_df, max_df, skew_df
+            gc.collect()
+
+        del df, grouped, features, labels
+        gc.collect()
 
         for stat_name, stat_df in agg_stats.items():
             stat_df.index.name = "Class"
@@ -358,6 +368,7 @@ class GLCMModel:
                 stat_df.to_csv(filename)
                 print(f"💾 Saved {stat_name} stats to {filename}")
 
+        gc.collect()
         return agg_stats
 
 
