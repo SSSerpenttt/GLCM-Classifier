@@ -92,7 +92,7 @@ class GLCMModel:
             glcm = graycomatrix(region, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
             props = [graycoprops(glcm, prop).flatten().astype(np.float32) for prop in ['contrast', 'homogeneity']]
 
-            entropy_vals, max_prob_vals, variance_vals, diff_entropy_vals = [], [], [], []
+            entropy_vals, max_prob_vals, variance_vals, cluster_shade_vals = [], [], [], []
             i_vals, j_vals = np.meshgrid(np.arange(levels), np.arange(levels), indexing='ij')
 
             for i in range(glcm.shape[2]):
@@ -100,21 +100,23 @@ class GLCMModel:
                     slice_glcm = glcm[:, :, i, j]
                     nonzero = slice_glcm[slice_glcm > 0]
                     entropy_vals.append(-np.sum(nonzero * np.log2(nonzero)))
+
                     max_prob_vals.append(np.max(slice_glcm))
+
                     mean = np.sum(i_vals * slice_glcm)
                     variance_vals.append(np.sum(slice_glcm * ((i_vals - mean) ** 2)))
-                    abs_diff = np.abs(i_vals - j_vals)
-                    diff_hist = np.zeros(levels)
-                    np.add.at(diff_hist, abs_diff.ravel(), slice_glcm.ravel())
-                    diff_nonzero = diff_hist[diff_hist > 0]
-                    diff_entropy_vals.append(-np.sum(diff_nonzero * np.log2(diff_nonzero)))
+
+                    # Cluster shade
+                    cluster_shade = np.sum(((i_vals + j_vals - 2 * mean) ** 3) * slice_glcm)
+                    cluster_shade_vals.append(cluster_shade)
 
             return np.hstack(props + [
                 np.array(entropy_vals, dtype=np.float32),
                 np.array(max_prob_vals, dtype=np.float32),
                 np.array(variance_vals, dtype=np.float32),
-                np.array(diff_entropy_vals, dtype=np.float32)
+                np.array(cluster_shade_vals, dtype=np.float32)
             ])
+
 
         def process_roi(image, roi, img_idx, roi_idx):
             x, y, w, h = map(int, roi)
@@ -130,7 +132,6 @@ class GLCMModel:
             cropped_image = self.preprocess_image(cropped_image)
             full_features = compute_glcm_features(cropped_image)
 
-            # Divide ROI into 3x3 patches
             patch_w = max(1, w // 3)
             patch_h = max(1, h // 3)
 
@@ -150,18 +151,25 @@ class GLCMModel:
 
             patch_features_arr = np.vstack(patch_features).astype(np.float32)
 
-            # Summary statistics
             mean_feat = np.mean(patch_features_arr, axis=0)
-            median_feat = np.median(patch_features_arr, axis=0)
-            std_feat = np.std(patch_features_arr, axis=0)
-            min_feat = np.min(patch_features_arr, axis=0)
-            max_feat = np.max(patch_features_arr, axis=0)
-            skew_feat = np.zeros_like(mean_feat, dtype=np.float32)
-            if not np.allclose(patch_features_arr, patch_features_arr[0]):
-                skew_feat = scipy.stats.skew(patch_features_arr, axis=0, nan_policy='omit')
-                skew_feat = np.nan_to_num(skew_feat, nan=0.0).astype(np.float32)
 
-            summary_stats = np.hstack([mean_feat, median_feat, std_feat, min_feat, max_feat, skew_feat])
+            q75 = np.percentile(patch_features_arr, 75, axis=0)
+            q25 = np.percentile(patch_features_arr, 25, axis=0)
+            iqr_feat = q75 - q25
+
+            std_feat = np.std(patch_features_arr, axis=0)
+
+            p95 = np.percentile(patch_features_arr, 95, axis=0)
+            p5 = np.percentile(patch_features_arr, 5, axis=0)
+            spread_95_5 = p95 - p5
+
+            kurtosis_feat = np.zeros_like(mean_feat, dtype=np.float32)
+            if not np.allclose(patch_features_arr, patch_features_arr[0]):
+                kurtosis_feat = scipy.stats.kurtosis(patch_features_arr, axis=0, fisher=True, nan_policy='omit')
+                kurtosis_feat = np.nan_to_num(kurtosis_feat, nan=0.0).astype(np.float32)
+
+            # Six summary stats: mean, IQR, std, 95-5 spread, kurtosis, 5th percentile
+            summary_stats = np.hstack([mean_feat, iqr_feat, std_feat, spread_95_5, kurtosis_feat, p5])
             roi_features = np.hstack([full_features, summary_stats]).astype(np.float32)
 
             return roi_features, (img_idx, roi_idx)
@@ -293,7 +301,8 @@ class GLCMModel:
         - Columns: GLCM base features (aggregated over patches)
         """
         import pandas as pd
-        from scipy.stats import skew
+        import numpy as np
+        from scipy.stats import kurtosis
         from IPython.display import display
         import gc
 
@@ -302,7 +311,7 @@ class GLCMModel:
 
         base_feature_names = [
             "contrast", "homogeneity", "entropy", "max_prob",
-            "variance", "diff_entropy"
+            "variance", "cluster_shade"
         ]
 
         num_features = features.shape[1]
@@ -322,7 +331,7 @@ class GLCMModel:
         # Initialize dict to store aggregated stats per feature
         agg_stats = {
             stat: pd.DataFrame(index=grouped.groups.keys(), columns=base_feature_names)
-            for stat in ["Mean", "Median", "Std", "Min", "Max", "Skew"]
+            for stat in ["Mean", "IQR", "Std", "5th Percentile", "95th Percentile", "Kurtosis"]
         }
 
         for base_feature in base_feature_names:
@@ -330,25 +339,34 @@ class GLCMModel:
             subset = df[related_cols + ["Label"]]
             grouped_subset = subset.groupby("Label")
 
+            # Compute all necessary stats per group
             mean_df = grouped_subset.mean()
-            median_df = grouped_subset.median()
             std_df = grouped_subset.std()
-            min_df = grouped_subset.min()
-            max_df = grouped_subset.max()
 
-            # Skew may produce NaNs; handled as needed
-            skew_df = grouped_subset.apply(lambda g: skew(g.drop(columns="Label"), axis=0)).apply(pd.Series)
+            # Calculate percentiles and IQR
+            p5_df = grouped_subset.quantile(0.05)
+            p25_df = grouped_subset.quantile(0.25)
+            p75_df = grouped_subset.quantile(0.75)
+            p95_df = grouped_subset.quantile(0.95)
 
+            # IQR = 75th percentile - 25th percentile
+            iqr_df = p75_df - p25_df
+
+            # Kurtosis - handle possible NaNs by fillna(0)
+            kurtosis_df = grouped_subset.apply(lambda g: kurtosis(g.drop(columns="Label"), axis=0, fisher=True, nan_policy='omit')).apply(pd.Series)
+            kurtosis_df = kurtosis_df.fillna(0)
+
+            # Aggregate per group by averaging over related columns
             agg_stats["Mean"][base_feature] = mean_df.mean(axis=1)
-            agg_stats["Median"][base_feature] = median_df.median(axis=1)
             agg_stats["Std"][base_feature] = std_df.mean(axis=1)
-            agg_stats["Min"][base_feature] = min_df.min(axis=1)
-            agg_stats["Max"][base_feature] = max_df.max(axis=1)
-            agg_stats["Skew"][base_feature] = skew_df.mean(axis=1)
+            agg_stats["5th Percentile"][base_feature] = p5_df.mean(axis=1)
+            agg_stats["95th Percentile"][base_feature] = p95_df.mean(axis=1)
+            agg_stats["IQR"][base_feature] = iqr_df.mean(axis=1)
+            agg_stats["Kurtosis"][base_feature] = kurtosis_df.mean(axis=1)
 
-            # Explicit garbage collection to free memory
+            # Cleanup
             del related_cols, subset, grouped_subset
-            del mean_df, median_df, std_df, min_df, max_df, skew_df
+            del mean_df, std_df, p5_df, p25_df, p75_df, p95_df, iqr_df, kurtosis_df
             gc.collect()
 
         del df, grouped, features, labels
@@ -361,12 +379,13 @@ class GLCMModel:
                 display(stat_df)
 
             if save_to_csv:
-                filename = f"{prefix}_{stat_name.lower()}.csv"
+                filename = f"{prefix}_{stat_name.lower().replace(' ', '_')}.csv"
                 stat_df.to_csv(filename)
                 print(f"💾 Saved {stat_name} stats to {filename}")
 
         gc.collect()
         return agg_stats
+
 
 
 
@@ -655,7 +674,7 @@ class GLCMModel:
                         mean_metrics = full_stack.mean(axis=0)
 
                         # Group by GLCM feature names
-                        base_feature_names = ["contrast", "homogeneity", "entropy", "max_prob", "variance", "diff_entropy"]
+                        base_feature_names = ["contrast", "homogeneity", "entropy", "max_prob", "variance", "cluster_shade"]
                         num_base = len(base_feature_names)
 
                         if roi_feature_len % num_base != 0:
