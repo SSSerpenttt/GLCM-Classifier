@@ -1,10 +1,10 @@
-# GLCM Depth Classifier 🏆
+# GLCM Depth Classifier
 
 A machine learning model for depth classification using **Gray-Level Co-occurrence Matrix (GLCM)** texture features and **LightGBM**.
 
 ---
 
-## 📌 Features
+## Features
 - Extracts **GLCM texture features** from grayscale images.
 - Trains a **GradientBoostingClassifier (LightGBM)** for depth classification.
 - Supports **multi-label binarization (MLB)** for structured label encoding.
@@ -31,7 +31,7 @@ glcm-classification-model
 └── README.md                # Project documentation
 ```
 
-## 🔧 Installation
+## Installation
 Clone the repository and install dependencies:
 ```bash
 git clone https://github.com/SSSerpenttt/GLCM-Classifier.git
@@ -140,7 +140,7 @@ For a step-by-step guide to training the model in Google Colab:
 ### 4. Model Saving and Evaluation
 After training, you can save the trained model as `trained-glcm_model.txt` file and the MLB data as `mlb.json`. Both files are needed to be able to run the trained model. You can evaluate the model's performance on the test dataset.
 
-#### 📂 Model Saving & Loading
+#### Model Saving & Loading
 - For saving the trained model:
 ```python
 model.save_model("trained-glcm_model.txt", "mlb.json")
@@ -150,7 +150,7 @@ model.save_model("trained-glcm_model.txt", "mlb.json")
 model.load_model("trained-glcm_model.txt", "mlb.json")
 ```
 
-#### ✅ Checking Model Integrity
+#### Checking Model Integrity
 Ensure the model and MLB files are not corrupted before loading:
 ```python
 from google.colab import files
@@ -209,7 +209,7 @@ Follow run the evaluate cell provided in the notebook. This will only work if:
 1. Your newly instantiated model just finished training.
 2. You created a new model instance and loaded your pre-trained weights.
 
-### 🎯 Evaluating Pre-Trained Model
+### Evaluating Pre-Trained Model
 
 If using a pre-trained model:
 ```python
