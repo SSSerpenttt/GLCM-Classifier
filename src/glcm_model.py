@@ -189,7 +189,7 @@ class GLCMModel:
         features = []
         valid_roi_indices = []
         for task_batch in batch(tasks, n=5000):  # Adjust batch size if needed
-            results = Parallel(n_jobs=96, backend='loky')(
+            results = Parallel(n_jobs=86, backend='loky')(
                 delayed(process_roi)(img, roi, i, j)
                 for img, roi, i, j in task_batch
             )
